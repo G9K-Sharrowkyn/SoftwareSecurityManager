@@ -1,56 +1,94 @@
-import { useEffect, useState } from "react";
+import { useState, useEffect } from "react";
 import { useParams } from "wouter";
-import { useQuery, useMutation, queryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/useAuth";
-import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
 import { isUnauthorizedError } from "@/lib/authUtils";
 import GameInterface from "@/components/GameInterface";
-import ChatWindow from "@/components/ChatWindow";
 import StarBackground from "@/components/StarBackground";
-import { GameEngine, Phases } from "@/lib/gameEngine";
-import { AIOpponent } from "@/lib/aiOpponent";
-import { useWebSocket } from "@/lib/websocket";
+import Chat from "@/components/Chat";
 
-interface Game {
-  id: number;
-  player1Id: string;
-  player2Id: string | null;
-  winnerId: string | null;
-  gameType: string;
-  currentPhase: string;
-  currentTurn: number;
-  isPlayerOneTurn: boolean;
-  gameState: any;
-  status: string;
-}
-
-export default function GamePage() {
-  const { gameId } = useParams();
+export default function Game() {
+  const { id: gameId } = useParams();
   const { user } = useAuth();
   const { toast } = useToast();
-  const [gameEngine, setGameEngine] = useState<GameEngine | null>(null);
-  const [aiOpponent, setAiOpponent] = useState<AIOpponent | null>(null);
-  const [localGameState, setLocalGameState] = useState<any>(null);
+  const queryClient = useQueryClient();
+  const [socket, setSocket] = useState<WebSocket | null>(null);
+  const [gameState, setGameState] = useState<any>(null);
+  const [showChat, setShowChat] = useState(false);
 
-  const { data: game, isLoading } = useQuery<Game>({
-    queryKey: ["/api/games", gameId],
+  const { data: game, isLoading } = useQuery({
+    queryKey: [`/api/games/${gameId}`],
     enabled: !!gameId,
     retry: false,
   });
 
-  const { data: userCards } = useQuery({
-    queryKey: ["/api/collection"],
-    retry: false,
-  });
+  // Initialize WebSocket connection
+  useEffect(() => {
+    if (!gameId || !user) return;
+
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const wsUrl = `${protocol}//${window.location.host}/ws`;
+    const ws = new WebSocket(wsUrl);
+
+    ws.onopen = () => {
+      console.log('WebSocket connected');
+      ws.send(JSON.stringify({
+        type: 'join_game',
+        gameId,
+        userId: user.id
+      }));
+      setSocket(ws);
+    };
+
+    ws.onmessage = (event) => {
+      const message = JSON.parse(event.data);
+      console.log('WebSocket message:', message);
+      
+      switch (message.type) {
+        case 'opponent_move':
+          // Handle opponent's move
+          setGameState((prev: any) => ({
+            ...prev,
+            ...message.move
+          }));
+          break;
+        case 'chat_message':
+          // Handle chat message
+          break;
+      }
+    };
+
+    ws.onclose = () => {
+      console.log('WebSocket disconnected');
+      setSocket(null);
+    };
+
+    return () => {
+      ws.close();
+    };
+  }, [gameId, user]);
+
+  // Initialize game state
+  useEffect(() => {
+    if (game) {
+      setGameState(game.gameState || {
+        player1: { health: 100, hand: [], units: [], commands: [], commandPoints: 0 },
+        player2: { health: 100, hand: [], units: [], commands: [], commandPoints: 0 },
+        currentPhase: "Command Phase",
+        turnNumber: 1
+      });
+    }
+  }, [game]);
 
   const updateGameMutation = useMutation({
-    mutationFn: async (updates: Partial<Game>) => {
+    mutationFn: async (updates: any) => {
       const response = await apiRequest("PUT", `/api/games/${gameId}`, updates);
       return response.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/games", gameId] });
+      queryClient.invalidateQueries({ queryKey: [`/api/games/${gameId}`] });
     },
     onError: (error) => {
       if (isUnauthorizedError(error)) {
@@ -72,172 +110,83 @@ export default function GamePage() {
     },
   });
 
-  const { sendMessage, lastMessage } = useWebSocket(`/ws`, {
-    onOpen: () => {
-      if (gameId && user?.id) {
-        sendMessage({
-          type: 'joinGame',
-          gameId: parseInt(gameId),
-          userId: user.id,
-        });
-      }
-    },
-  });
+  const handleGameMove = (move: any) => {
+    // Update local game state
+    const newGameState = { ...gameState, ...move };
+    setGameState(newGameState);
 
-  useEffect(() => {
-    if (lastMessage) {
-      try {
-        const data = JSON.parse(lastMessage.data);
-        
-        switch (data.type) {
-          case 'gameUpdate':
-            queryClient.invalidateQueries({ queryKey: ["/api/games", gameId] });
-            break;
-          case 'gameAction':
-            if (gameEngine) {
-              gameEngine.processAction(data.data);
-              setLocalGameState({ ...gameEngine.getGameState() });
-            }
-            break;
-          case 'playerJoined':
-            toast({
-              title: "Player Joined",
-              description: "Another player has joined the game",
-            });
-            break;
-        }
-      } catch (error) {
-        console.error('Error processing WebSocket message:', error);
-      }
-    }
-  }, [lastMessage, gameEngine, gameId, queryClient, toast]);
+    // Send move to server
+    updateGameMutation.mutate({ gameState: newGameState });
 
-  useEffect(() => {
-    if (game && user && userCards) {
-      // Initialize game engine
-      const engine = new GameEngine(game, user.id);
-      setGameEngine(engine);
-      setLocalGameState(engine.getGameState());
-
-      // Initialize AI opponent if it's an AI game
-      if (game.gameType === 'ai' && !game.player2Id) {
-        const ai = new AIOpponent('hard');
-        setAiOpponent(ai);
-      }
-    }
-  }, [game, user, userCards]);
-
-  const handleGameAction = (action: any) => {
-    if (!gameEngine) return;
-
-    try {
-      const result = gameEngine.processAction(action);
-      setLocalGameState({ ...gameEngine.getGameState() });
-
-      // Send action to other players via WebSocket
-      if (game?.gameType === 'multiplayer') {
-        sendMessage({
-          type: 'gameAction',
-          gameId: parseInt(gameId!),
-          data: action,
-        });
-      }
-
-      // Update game state in database
-      updateGameMutation.mutate({
-        gameState: gameEngine.getGameState(),
-        currentPhase: gameEngine.getCurrentPhase(),
-        currentTurn: gameEngine.getCurrentTurn(),
-        isPlayerOneTurn: gameEngine.isPlayerOneTurn(),
-      });
-
-      // Process AI turn if it's an AI game and it's AI's turn
-      if (aiOpponent && game?.gameType === 'ai' && !gameEngine.isPlayerTurn(user?.id || '')) {
-        setTimeout(() => {
-          const aiAction = aiOpponent.getNextAction(gameEngine.getGameState());
-          if (aiAction) {
-            handleGameAction(aiAction);
-          }
-        }, 1000);
-      }
-
-      return result;
-    } catch (error) {
-      console.error('Game action error:', error);
-      toast({
-        title: "Invalid Action",
-        description: error instanceof Error ? error.message : "Action could not be performed",
-        variant: "destructive",
-      });
+    // Send move to other players via WebSocket
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify({
+        type: 'game_move',
+        gameId,
+        move
+      }));
     }
   };
 
-  const handleEndPhase = () => {
-    handleGameAction({ type: 'endPhase' });
+  const handleChatMessage = (message: string) => {
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify({
+        type: 'chat_message',
+        gameId,
+        message,
+        sender: user?.username || 'Anonymous'
+      }));
+    }
   };
 
-  const handlePlayCard = (cardId: number, targetZone: string) => {
-    handleGameAction({
-      type: 'playCard',
-      cardId,
-      targetZone,
-      playerId: user?.id,
-    });
-  };
-
-  const handleDrawCard = () => {
-    handleGameAction({
-      type: 'drawCard',
-      playerId: user?.id,
-    });
-  };
-
-  const handleExitGame = () => {
-    window.location.href = "/";
-  };
-
-  if (isLoading || !game || !gameEngine || !localGameState) {
+  if (isLoading) {
     return (
-      <div className="min-h-screen bg-cosmic-900 flex items-center justify-center">
+      <div className="min-h-screen bg-cosmic-black flex items-center justify-center">
         <StarBackground />
-        <div className="text-center">
-          <i className="fas fa-spinner fa-spin text-cosmic-gold text-4xl mb-4"></i>
-          <p className="text-cosmic-silver">Loading game...</p>
-        </div>
+        <div className="relative z-10 text-cosmic-gold">Loading game...</div>
+      </div>
+    );
+  }
+
+  if (!game) {
+    return (
+      <div className="min-h-screen bg-cosmic-black flex items-center justify-center">
+        <StarBackground />
+        <div className="relative z-10 text-cosmic-silver">Game not found</div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-cosmic-900 relative overflow-hidden">
+    <div className="min-h-screen bg-cosmic-black text-cosmic-silver relative">
       <StarBackground />
       
-      <GameInterface
-        game={game}
-        gameState={localGameState}
-        userCards={userCards || []}
-        onEndPhase={handleEndPhase}
-        onPlayCard={handlePlayCard}
-        onDrawCard={handleDrawCard}
-        onExitGame={handleExitGame}
-        isPlayerTurn={gameEngine.isPlayerTurn(user?.id || '')}
-      />
-
-      <ChatWindow
-        gameId={parseInt(gameId!)}
-        onSendMessage={(message) => {
-          sendMessage({
-            type: 'chat',
-            gameId: parseInt(gameId!),
-            data: {
-              userId: user?.id,
-              username: user?.firstName || 'Player',
-              message,
-              timestamp: new Date().toISOString(),
-            },
-          });
-        }}
-      />
+      <div className="relative z-10">
+        <GameInterface
+          game={game}
+          gameState={gameState}
+          onGameMove={handleGameMove}
+          currentUser={user}
+        />
+        
+        {/* Chat Toggle */}
+        <button
+          className="fixed bottom-4 right-4 bg-cosmic-gold text-cosmic-black p-3 rounded-full shadow-lg hover:bg-cosmic-gold/80 transition-colors z-50"
+          onClick={() => setShowChat(!showChat)}
+        >
+          <i className="fas fa-comments"></i>
+        </button>
+        
+        {/* Chat Component */}
+        {showChat && (
+          <Chat
+            gameId={gameId}
+            socket={socket}
+            onSendMessage={handleChatMessage}
+            onClose={() => setShowChat(false)}
+          />
+        )}
+      </div>
     </div>
   );
 }

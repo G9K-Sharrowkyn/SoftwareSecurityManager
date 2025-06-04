@@ -1,329 +1,323 @@
-import { useEffect, useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useAuth } from "@/hooks/useAuth";
-import { useToast } from "@/hooks/use-toast";
-import { isUnauthorizedError } from "@/lib/authUtils";
-import { apiRequest } from "@/lib/queryClient";
+import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import Navigation from "@/components/layout/navigation";
-import BoosterPackModal from "@/components/game/BoosterPackModal";
+import Navigation from "@/components/ui/navigation";
+import { Search, Filter, Star, Layers, Zap } from "lucide-react";
 
 export default function Collection() {
-  const { isAuthenticated, isLoading } = useAuth();
-  const { toast } = useToast();
-  const queryClient = useQueryClient();
   const [searchTerm, setSearchTerm] = useState("");
-  const [filterType, setFilterType] = useState("all");
-  const [showBoosterModal, setShowBoosterModal] = useState(false);
+  const [selectedRarity, setSelectedRarity] = useState<string>("all");
+  const [selectedType, setSelectedType] = useState<string>("all");
+  const [sortBy, setSortBy] = useState<string>("name");
 
-  // Redirect if not authenticated
-  useEffect(() => {
-    if (!isLoading && !isAuthenticated) {
-      toast({
-        title: "Unauthorized",
-        description: "You are logged out. Logging in again...",
-        variant: "destructive",
-      });
-      setTimeout(() => {
-        window.location.href = "/api/login";
-      }, 500);
-      return;
+  const { data: userCards, isLoading } = useQuery({
+    queryKey: ["/api/user/cards"],
+  });
+
+  const { data: allCards } = useQuery({
+    queryKey: ["/api/cards"],
+  });
+
+  // Filter and sort cards
+  const filteredCards = userCards?.filter(userCard => {
+    const card = userCard.card;
+    const matchesSearch = card.name.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesRarity = selectedRarity === "all" || card.rarity === selectedRarity;
+    const matchesType = selectedType === "all" || card.type.some(t => t.toLowerCase() === selectedType.toLowerCase());
+    
+    return matchesSearch && matchesRarity && matchesType;
+  }).sort((a, b) => {
+    switch (sortBy) {
+      case "name":
+        return a.card.name.localeCompare(b.card.name);
+      case "rarity":
+        const rarityOrder = { "Common": 1, "Uncommon": 2, "Rare": 3, "Epic": 4, "Legendary": 5 };
+        return (rarityOrder[b.card.rarity as keyof typeof rarityOrder] || 0) - (rarityOrder[a.card.rarity as keyof typeof rarityOrder] || 0);
+      case "cost":
+        return a.card.commandCost - b.card.commandCost;
+      case "quantity":
+        return b.quantity - a.quantity;
+      default:
+        return 0;
     }
-  }, [isAuthenticated, isLoading, toast]);
-
-  // Fetch user's collection
-  const { data: userCards, isLoading: cardsLoading } = useQuery({
-    queryKey: ["/api/collection"],
-    enabled: isAuthenticated,
-    retry: false,
   });
 
-  // Fetch user's decks
-  const { data: userDecks } = useQuery({
-    queryKey: ["/api/decks"],
-    enabled: isAuthenticated,
-    retry: false,
-  });
+  const getRarityColor = (rarity: string) => {
+    switch (rarity) {
+      case "Common": return "bg-gray-600";
+      case "Uncommon": return "bg-green-600";
+      case "Rare": return "bg-blue-600";
+      case "Epic": return "bg-purple-600";
+      case "Legendary": return "bg-yellow-600";
+      default: return "bg-gray-600";
+    }
+  };
 
-  // Fetch booster packs
-  const { data: boosterPacks } = useQuery({
-    queryKey: ["/api/booster-packs"],
-    enabled: isAuthenticated,
-    retry: false,
-  });
+  const getTypeIcon = (types: string[]) => {
+    if (types.includes("Shipyard")) return <Layers className="w-4 h-4" />;
+    if (types.some(t => t.includes("Unit") || t.includes("Machine") || t.includes("Biological"))) return <Zap className="w-4 h-4" />;
+    return <Star className="w-4 h-4" />;
+  };
 
-  // Create deck mutation
-  const createDeckMutation = useMutation({
-    mutationFn: async (deckData: { name: string; cardData: any[] }) => {
-      const response = await apiRequest("POST", "/api/decks", deckData);
-      return response.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/decks"] });
-      toast({
-        title: "Success",
-        description: "Deck created successfully!",
-      });
-    },
-    onError: (error) => {
-      if (isUnauthorizedError(error)) {
-        toast({
-          title: "Unauthorized",
-          description: "You are logged out. Logging in again...",
-          variant: "destructive",
-        });
-        setTimeout(() => {
-          window.location.href = "/api/login";
-        }, 500);
-        return;
-      }
-      toast({
-        title: "Error",
-        description: "Failed to create deck",
-        variant: "destructive",
-      });
-    },
-  });
-
-  if (isLoading || cardsLoading) {
+  if (isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-cosmic-gold text-xl">Loading collection...</div>
+      <div className="min-h-screen">
+        <Navigation />
+        <div className="container mx-auto px-4 py-8 flex items-center justify-center">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-primary mx-auto mb-4"></div>
+            <p className="text-lg text-muted-foreground">Loading your collection...</p>
+          </div>
+        </div>
       </div>
     );
   }
 
-  if (!isAuthenticated) {
-    return null;
-  }
-
-  // Filter cards based on search and type
-  const filteredCards = userCards?.filter((userCard: any) => {
-    const card = userCard.card;
-    const matchesSearch = card.name.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesType = filterType === "all" || 
-      (filterType === "units" && !card.type.includes("Shipyard")) ||
-      (filterType === "shipyards" && card.type.includes("Shipyard"));
-    return matchesSearch && matchesType;
-  }) || [];
-
-  const availablePacks = boosterPacks?.filter((pack: any) => !pack.isOpened) || [];
-
-  const createStarterDeck = () => {
-    if (!userCards || userCards.length < 10) {
-      toast({
-        title: "Not enough cards",
-        description: "You need at least 10 cards to create a deck",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    const deckCards = userCards.slice(0, Math.min(20, userCards.length)).map((userCard: any) => ({
-      cardId: userCard.cardId,
-      quantity: Math.min(userCard.quantity, 3)
-    }));
-
-    createDeckMutation.mutate({
-      name: `Deck ${(userDecks?.length || 0) + 1}`,
-      cardData: deckCards,
-    });
-  };
-
   return (
-    <div className="min-h-screen relative z-10">
+    <div className="min-h-screen">
       <Navigation />
       
-      <main className="max-w-7xl mx-auto px-4 py-6">
+      <main className="container mx-auto px-4 py-8 relative z-10">
         {/* Header */}
         <div className="text-center mb-8">
-          <h1 className="text-4xl font-bold text-cosmic-gold mb-4">Your Collection</h1>
-          <p className="text-cosmic-silver">
-            Manage your cards and build powerful decks
+          <h1 className="text-4xl font-bold text-primary mb-4 cosmic-text-glow">
+            Card Collection
+          </h1>
+          <p className="text-xl text-muted-foreground">
+            Manage your stellar fleet and build powerful decks
           </p>
         </div>
 
-        {/* Stats and Actions */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-          <Card className="bg-cosmic-800/50 border-cosmic-600">
-            <CardHeader>
-              <CardTitle className="text-cosmic-gold">Collection Stats</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-2">
-                <div className="flex justify-between">
-                  <span className="text-cosmic-silver">Total Cards:</span>
-                  <span className="text-cosmic-gold font-bold">{userCards?.length || 0}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-cosmic-silver">Unique Cards:</span>
-                  <span className="text-cosmic-gold font-bold">
-                    {new Set(userCards?.map((uc: any) => uc.cardId)).size || 0}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-cosmic-silver">Decks Built:</span>
-                  <span className="text-cosmic-gold font-bold">{userDecks?.length || 0}</span>
-                </div>
-              </div>
+        {/* Stats Overview */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+          <Card className="cosmic-card">
+            <CardContent className="p-6 text-center">
+              <Layers className="w-8 h-8 text-primary mx-auto mb-2" />
+              <div className="text-2xl font-bold text-primary">{userCards?.length || 0}</div>
+              <div className="text-sm text-muted-foreground">Unique Cards</div>
             </CardContent>
           </Card>
-
-          <Card className="bg-cosmic-800/50 border-cosmic-600">
-            <CardHeader>
-              <CardTitle className="text-cosmic-gold">Booster Packs</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                <div className="text-center">
-                  <div className="text-2xl font-bold text-cosmic-gold">{availablePacks.length}</div>
-                  <div className="text-cosmic-silver">Available Packs</div>
-                </div>
-                <Button 
-                  onClick={() => setShowBoosterModal(true)}
-                  disabled={availablePacks.length === 0}
-                  className="w-full bg-purple-600 hover:bg-purple-700 text-white"
-                >
-                  <i className="fas fa-gift mr-2"></i>
-                  Open Pack
-                </Button>
+          
+          <Card className="cosmic-card">
+            <CardContent className="p-6 text-center">
+              <Star className="w-8 h-8 text-yellow-500 mx-auto mb-2" />
+              <div className="text-2xl font-bold text-yellow-500">
+                {userCards?.reduce((sum, uc) => sum + uc.quantity, 0) || 0}
               </div>
+              <div className="text-sm text-muted-foreground">Total Cards</div>
             </CardContent>
           </Card>
-
-          <Card className="bg-cosmic-800/50 border-cosmic-600">
-            <CardHeader>
-              <CardTitle className="text-cosmic-gold">Quick Actions</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-3">
-                <Button 
-                  onClick={createStarterDeck}
-                  disabled={createDeckMutation.isPending || !userCards || userCards.length < 10}
-                  className="w-full bg-cosmic-gold hover:bg-cosmic-gold/80 text-cosmic-900"
-                >
-                  <i className="fas fa-plus mr-2"></i>
-                  Create Deck
-                </Button>
-                <Button 
-                  variant="outline"
-                  className="w-full border-cosmic-gold text-cosmic-gold hover:bg-cosmic-gold hover:text-cosmic-900"
-                >
-                  <i className="fas fa-download mr-2"></i>
-                  Export Collection
-                </Button>
+          
+          <Card className="cosmic-card">
+            <CardContent className="p-6 text-center">
+              <div className="text-2xl font-bold text-purple-500">
+                {userCards?.filter(uc => uc.card.rarity === "Legendary").length || 0}
               </div>
+              <div className="text-sm text-muted-foreground">Legendary</div>
+            </CardContent>
+          </Card>
+          
+          <Card className="cosmic-card">
+            <CardContent className="p-6 text-center">
+              <div className="text-2xl font-bold text-blue-500">
+                {Math.round(((userCards?.length || 0) / (allCards?.length || 1)) * 100)}%
+              </div>
+              <div className="text-sm text-muted-foreground">Complete</div>
             </CardContent>
           </Card>
         </div>
 
-        {/* Filters */}
-        <div className="flex flex-col md:flex-row gap-4 mb-6">
-          <Input
-            placeholder="Search cards..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="bg-cosmic-700 border-cosmic-600 text-cosmic-silver placeholder:text-cosmic-silver/50"
-          />
-          <Select value={filterType} onValueChange={setFilterType}>
-            <SelectTrigger className="bg-cosmic-700 border-cosmic-600 text-cosmic-silver md:w-48">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Cards</SelectItem>
-              <SelectItem value="units">Units</SelectItem>
-              <SelectItem value="shipyards">Shipyards</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-
-        {/* Card Grid */}
-        {filteredCards.length === 0 ? (
-          <div className="text-center py-12">
-            <div className="text-cosmic-silver text-lg mb-4">
-              {userCards?.length === 0 ? "No cards in your collection yet" : "No cards match your filters"}
-            </div>
-            {userCards?.length === 0 && (
+        {/* Filters and Search */}
+        <Card className="cosmic-card mb-8">
+          <CardHeader>
+            <CardTitle className="text-primary flex items-center">
+              <Filter className="w-5 h-5 mr-2" />
+              Filter & Search
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+              <div className="relative">
+                <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search cards..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="pl-10"
+                />
+              </div>
+              
+              <Select value={selectedRarity} onValueChange={setSelectedRarity}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Rarity" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Rarities</SelectItem>
+                  <SelectItem value="Common">Common</SelectItem>
+                  <SelectItem value="Uncommon">Uncommon</SelectItem>
+                  <SelectItem value="Rare">Rare</SelectItem>
+                  <SelectItem value="Epic">Epic</SelectItem>
+                  <SelectItem value="Legendary">Legendary</SelectItem>
+                </SelectContent>
+              </Select>
+              
+              <Select value={selectedType} onValueChange={setSelectedType}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Types</SelectItem>
+                  <SelectItem value="shipyard">Shipyard</SelectItem>
+                  <SelectItem value="unit">Unit</SelectItem>
+                  <SelectItem value="command">Command</SelectItem>
+                </SelectContent>
+              </Select>
+              
+              <Select value={sortBy} onValueChange={setSortBy}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Sort by" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="name">Name</SelectItem>
+                  <SelectItem value="rarity">Rarity</SelectItem>
+                  <SelectItem value="cost">Cost</SelectItem>
+                  <SelectItem value="quantity">Quantity</SelectItem>
+                </SelectContent>
+              </Select>
+              
               <Button 
-                onClick={() => setShowBoosterModal(true)}
-                className="bg-purple-600 hover:bg-purple-700 text-white"
+                variant="outline" 
+                onClick={() => {
+                  setSearchTerm("");
+                  setSelectedRarity("all");
+                  setSelectedType("all");
+                  setSortBy("name");
+                }}
               >
-                <i className="fas fa-gift mr-2"></i>
-                Open Your First Pack
+                Clear Filters
               </Button>
-            )}
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-            {filteredCards.map((userCard: any) => (
-              <Card key={`${userCard.cardId}-${userCard.id}`} className="bg-cosmic-800/50 border-cosmic-600 hover:border-cosmic-gold transition-all duration-300 cursor-pointer">
-                <CardContent className="p-4">
-                  <div className="aspect-[3/4] bg-gradient-to-br from-cosmic-blue to-cosmic-700 rounded-lg mb-3 flex items-center justify-center relative overflow-hidden">
-                    {userCard.card.imageUrl ? (
-                      <img 
-                        src={userCard.card.imageUrl} 
-                        alt={userCard.card.name}
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      <div className="text-cosmic-gold text-4xl">
-                        <i className={userCard.card.type.includes("Shipyard") ? "fas fa-industry" : "fas fa-rocket"}></i>
-                      </div>
-                    )}
-                    
-                    {/* Card stats overlay */}
-                    <div className="absolute top-2 left-2 right-2 bg-black/80 rounded text-xs text-center">
-                      <div className="text-cosmic-gold font-semibold truncate">{userCard.card.name}</div>
-                    </div>
-                    
-                    {!userCard.card.type.includes("Shipyard") && (
-                      <div className="absolute bottom-2 left-2 right-2 bg-black/80 rounded text-xs">
-                        <div className="flex justify-between items-center text-white px-1">
-                          <span className="text-red-400">{userCard.card.attack}</span>
-                          <span className="text-amber-400">{userCard.card.commandCost}</span>
-                          <span className="text-blue-400">{userCard.card.defense}</span>
-                        </div>
-                      </div>
-                    )}
+            </div>
+          </CardContent>
+        </Card>
 
-                    {/* Quantity badge */}
-                    <div className="absolute top-2 right-2 bg-cosmic-gold text-cosmic-900 rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold">
-                      {userCard.quantity}
+        {/* Collection Tabs */}
+        <Tabs defaultValue="grid" className="space-y-6">
+          <TabsList className="grid w-full grid-cols-2 lg:w-[400px]">
+            <TabsTrigger value="grid">Grid View</TabsTrigger>
+            <TabsTrigger value="list">List View</TabsTrigger>
+          </TabsList>
+          
+          <TabsContent value="grid">
+            {filteredCards && filteredCards.length > 0 ? (
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+                {filteredCards.map((userCard) => (
+                  <Card key={userCard.id} className="cosmic-card group cursor-pointer hover:scale-105 transition-all duration-300">
+                    <div className="relative">
+                      {userCard.card.imageUrl ? (
+                        <img
+                          src={userCard.card.imageUrl}
+                          alt={userCard.card.name}
+                          className="w-full h-48 object-cover rounded-t-lg"
+                        />
+                      ) : (
+                        <div className="w-full h-48 bg-gradient-to-br from-primary/20 to-secondary/20 rounded-t-lg flex items-center justify-center">
+                          {getTypeIcon(userCard.card.type)}
+                        </div>
+                      )}
+                      
+                      <Badge className={`absolute top-2 left-2 ${getRarityColor(userCard.card.rarity)}`}>
+                        {userCard.card.rarity}
+                      </Badge>
+                      
+                      {userCard.quantity > 1 && (
+                        <Badge className="absolute top-2 right-2 bg-primary text-primary-foreground">
+                          x{userCard.quantity}
+                        </Badge>
+                      )}
                     </div>
-                  </div>
-                  
-                  <div className="space-y-1">
-                    <div className="font-semibold text-cosmic-gold text-sm truncate">
-                      {userCard.card.name}
-                    </div>
-                    <div className="text-xs text-cosmic-silver">
-                      {userCard.card.type.join(", ")}
-                    </div>
-                    <div className={`text-xs px-2 py-1 rounded text-center ${
-                      userCard.card.rarity === "legendary" ? "bg-purple-600 text-white" :
-                      userCard.card.rarity === "rare" ? "bg-blue-600 text-white" :
-                      userCard.card.rarity === "uncommon" ? "bg-green-600 text-white" :
-                      "bg-gray-600 text-white"
-                    }`}>
-                      {userCard.card.rarity}
-                    </div>
-                  </div>
+                    
+                    <CardContent className="p-4">
+                      <h3 className="font-semibold text-sm mb-2 truncate">{userCard.card.name}</h3>
+                      <div className="flex items-center justify-between text-xs text-muted-foreground">
+                        <span>Cost: {userCard.card.commandCost}</span>
+                        {userCard.card.attack > 0 && (
+                          <span>{userCard.card.attack}/{userCard.card.defense}</span>
+                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            ) : (
+              <Card className="cosmic-card">
+                <CardContent className="p-12 text-center">
+                  <Layers className="w-16 h-16 mx-auto mb-4 text-muted-foreground opacity-50" />
+                  <h3 className="text-xl font-semibold mb-2">No cards found</h3>
+                  <p className="text-muted-foreground mb-6">
+                    {searchTerm || selectedRarity !== "all" || selectedType !== "all"
+                      ? "Try adjusting your filters to see more cards."
+                      : "Start opening booster packs to build your collection!"}
+                  </p>
+                  <Button className="cosmic-button">
+                    Open Booster Pack
+                  </Button>
                 </CardContent>
               </Card>
-            ))}
-          </div>
-        )}
+            )}
+          </TabsContent>
+          
+          <TabsContent value="list">
+            <Card className="cosmic-card">
+              <CardContent className="p-0">
+                <div className="space-y-0">
+                  {filteredCards?.map((userCard, index) => (
+                    <div 
+                      key={userCard.id}
+                      className={`flex items-center p-4 hover:bg-muted/50 transition-colors ${
+                        index !== filteredCards.length - 1 ? 'border-b border-border' : ''
+                      }`}
+                    >
+                      <div className="w-16 h-16 rounded-lg bg-gradient-to-br from-primary/20 to-secondary/20 flex items-center justify-center mr-4">
+                        {getTypeIcon(userCard.card.type)}
+                      </div>
+                      
+                      <div className="flex-1">
+                        <h3 className="font-semibold">{userCard.card.name}</h3>
+                        <p className="text-sm text-muted-foreground">
+                          {userCard.card.type.join(", ")}
+                        </p>
+                      </div>
+                      
+                      <div className="text-right mr-4">
+                        <div className="font-semibold">Cost: {userCard.card.commandCost}</div>
+                        {userCard.card.attack > 0 && (
+                          <div className="text-sm text-muted-foreground">
+                            {userCard.card.attack}/{userCard.card.defense}
+                          </div>
+                        )}
+                      </div>
+                      
+                      <div className="flex flex-col items-end space-y-2">
+                        <Badge className={getRarityColor(userCard.card.rarity)}>
+                          {userCard.card.rarity}
+                        </Badge>
+                        <Badge variant="outline">
+                          x{userCard.quantity}
+                        </Badge>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+        </Tabs>
       </main>
-
-      {/* Booster Pack Modal */}
-      <BoosterPackModal 
-        isOpen={showBoosterModal}
-        onClose={() => setShowBoosterModal(false)}
-        availablePacks={availablePacks}
-      />
     </div>
   );
 }

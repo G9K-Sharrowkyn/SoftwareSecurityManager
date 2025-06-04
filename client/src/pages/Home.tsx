@@ -1,49 +1,46 @@
 import { useState } from "react";
-import { useQuery, useMutation, queryClient } from "@tanstack/react-query";
-import { Link } from "wouter";
-import { Button } from "@/components/ui/button";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/hooks/useAuth";
-import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
 import { isUnauthorizedError } from "@/lib/authUtils";
 import StarBackground from "@/components/StarBackground";
-import BoosterPackModal from "@/components/BoosterPackModal";
-
-interface UserStats {
-  totalWins: number;
-  totalLosses: number;
-  winRate: number;
-  currentLevel: number;
-  experience: number;
-  rank: string;
-}
+import BoosterPack from "@/components/BoosterPack";
+import { useLocation } from "wouter";
 
 export default function Home() {
-  const { user } = useAuth();
+  const { user, isLoading: authLoading } = useAuth();
   const { toast } = useToast();
-  const [showBoosterModal, setShowBoosterModal] = useState(false);
+  const queryClient = useQueryClient();
+  const [, setLocation] = useLocation();
+  const [showBoosterPack, setShowBoosterPack] = useState(false);
 
-  const { data: stats, isLoading: statsLoading } = useQuery<UserStats>({
-    queryKey: ["/api/stats"],
+  const { data: userGames, isLoading: gamesLoading } = useQuery({
+    queryKey: ["/api/games"],
     retry: false,
   });
 
-  const { data: boosterPacks } = useQuery({
-    queryKey: ["/api/booster-packs"],
+  const { data: leaderboard, isLoading: leaderboardLoading } = useQuery({
+    queryKey: ["/api/leaderboard"],
     retry: false,
   });
 
-  const createQuickGameMutation = useMutation({
-    mutationFn: async () => {
-      const response = await apiRequest("POST", "/api/games", {
-        gameType: "ai",
-        player2Id: null,
-      });
+  const { data: userBoosterPacks } = useQuery({
+    queryKey: ["/api/user-booster-packs"],
+    retry: false,
+  });
+
+  const createGameMutation = useMutation({
+    mutationFn: async (gameData: { isAIGame: boolean; aiDifficulty?: string }) => {
+      const response = await apiRequest("POST", "/api/games", gameData);
       return response.json();
     },
     onSuccess: (game) => {
-      window.location.href = `/game/${game.id}`;
+      queryClient.invalidateQueries({ queryKey: ["/api/games"] });
+      setLocation(`/game/${game.id}`);
     },
     onError: (error) => {
       if (isUnauthorizedError(error)) {
@@ -65,69 +62,28 @@ export default function Home() {
     },
   });
 
-  const buyBoosterPackMutation = useMutation({
-    mutationFn: async () => {
-      const response = await apiRequest("POST", "/api/booster-packs", {
-        packType: "standard",
-        cost: 100,
-        cardCount: 5,
-      });
-      return response.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/booster-packs"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
-      toast({
-        title: "Success",
-        description: "Booster pack purchased!",
-      });
-    },
-    onError: (error) => {
-      if (isUnauthorizedError(error)) {
-        toast({
-          title: "Unauthorized",
-          description: "You are logged out. Logging in again...",
-          variant: "destructive",
-        });
-        setTimeout(() => {
-          window.location.href = "/api/login";
-        }, 500);
-        return;
-      }
-      toast({
-        title: "Error",
-        description: "Failed to purchase booster pack",
-        variant: "destructive",
-      });
-    },
-  });
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-cosmic-black flex items-center justify-center">
+        <div className="text-cosmic-gold">Loading...</div>
+      </div>
+    );
+  }
 
-  const handleLogout = () => {
-    window.location.href = "/api/logout";
+  const handleStartGame = (difficulty: string) => {
+    createGameMutation.mutate({ isAIGame: true, aiDifficulty: difficulty });
   };
 
-  const startQuickMatch = () => {
-    createQuickGameMutation.mutate();
-  };
-
-  const buyBoosterPack = () => {
-    if (!user || user.currency < 100) {
-      toast({
-        title: "Insufficient Currency",
-        description: "You need at least 100 credits to buy a booster pack",
-        variant: "destructive",
-      });
-      return;
-    }
-    buyBoosterPackMutation.mutate();
-  };
+  const winRate = user?.totalWins && user?.totalLosses 
+    ? Math.round((user.totalWins / (user.totalWins + user.totalLosses)) * 100)
+    : 0;
 
   return (
-    <div className="min-h-screen relative overflow-hidden">
+    <div className="min-h-screen bg-cosmic-black text-cosmic-silver relative">
       <StarBackground />
       
-      {/* Navigation Header */}
-      <nav className="relative z-50 bg-cosmic-800/90 backdrop-blur-md border-b border-cosmic-600">
+      {/* Navigation */}
+      <nav className="relative z-50 bg-cosmic-blue/90 backdrop-blur-md border-b border-cosmic-gold/30">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
             <div className="flex items-center space-x-4">
@@ -138,204 +94,233 @@ export default function Home() {
             </div>
             
             <div className="hidden md:flex items-center space-x-6">
-              <Link href="/" className="text-cosmic-silver hover:text-cosmic-gold transition-colors duration-200 font-medium">
+              <Button variant="ghost" onClick={() => setLocation('/')}>
                 <i className="fas fa-home mr-2"></i>Dashboard
-              </Link>
-              <Link href="/collection" className="text-cosmic-silver hover:text-cosmic-gold transition-colors duration-200 font-medium">
+              </Button>
+              <Button variant="ghost" onClick={() => setLocation('/collection')}>
                 <i className="fas fa-layer-group mr-2"></i>Collection
-              </Link>
-              <Link href="/rankings" className="text-cosmic-silver hover:text-cosmic-gold transition-colors duration-200 font-medium">
-                <i className="fas fa-trophy mr-2"></i>Rankings
-              </Link>
+              </Button>
+              <Button variant="ghost" onClick={() => setLocation('/deck-builder')}>
+                <i className="fas fa-edit mr-2"></i>Deck Builder
+              </Button>
             </div>
 
             <div className="flex items-center space-x-4">
-              <div className="flex items-center space-x-4">
-                <div className="flex items-center space-x-2 bg-cosmic-700 px-3 py-2 rounded-lg">
-                  <i className="fas fa-coins text-cosmic-gold"></i>
-                  <span className="text-sm font-semibold">{user?.currency || 0}</span>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <img 
-                    src={user?.profileImageUrl || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user?.id}`}
-                    alt="Player Avatar" 
-                    className="w-10 h-10 rounded-full border-2 border-cosmic-gold object-cover" 
-                  />
-                  <span className="text-sm font-medium">{user?.firstName || "Commander"}</span>
-                </div>
-                <Button
-                  onClick={handleLogout}
-                  variant="outline"
-                  size="sm"
-                  className="border-cosmic-gold text-cosmic-gold hover:bg-cosmic-gold hover:text-cosmic-900"
-                >
-                  Logout
-                </Button>
+              <div className="flex items-center space-x-2 bg-cosmic-blue/50 px-3 py-2 rounded-lg">
+                <i className="fas fa-coins text-cosmic-gold"></i>
+                <span className="text-sm font-semibold">{user?.credits || 0}</span>
               </div>
+              <div className="flex items-center space-x-2">
+                <div className="w-10 h-10 rounded-full bg-cosmic-gold/20 flex items-center justify-center">
+                  <i className="fas fa-user text-cosmic-gold"></i>
+                </div>
+                <div className="hidden md:block">
+                  <div className="text-sm font-medium">{user?.username}</div>
+                  <div className="text-xs text-cosmic-silver/70">Level {user?.level}</div>
+                </div>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => window.location.href = '/api/logout'}
+              >
+                <i className="fas fa-sign-out-alt mr-2"></i>Logout
+              </Button>
             </div>
           </div>
         </div>
       </nav>
 
-      <main className="relative z-10 min-h-screen pt-6">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          {/* Hero Section */}
-          <div className="text-center mb-12">
-            <h1 className="text-5xl md:text-7xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-cosmic-gold to-cosmic-silver mb-6 animate-glow">
-              Command Center
-            </h1>
-            <p className="text-xl text-cosmic-silver mb-8 max-w-2xl mx-auto">
-              Welcome back, Commander. Your fleet awaits your orders.
-            </p>
-            
-            <div className="flex flex-wrap justify-center gap-4">
-              <Button 
-                onClick={startQuickMatch}
-                disabled={createQuickGameMutation.isPending}
-                className="bg-gradient-to-r from-cosmic-gold to-cosmic-gold-dark text-cosmic-900 font-bold px-8 py-4 rounded-xl transition-all duration-300 transform hover:scale-105 hover:shadow-lg hover:shadow-cosmic-gold/50"
-              >
-                {createQuickGameMutation.isPending ? (
-                  <>
-                    <i className="fas fa-spinner fa-spin mr-2"></i>Launching...
-                  </>
-                ) : (
-                  <>
-                    <i className="fas fa-bolt mr-2"></i>Quick Battle
-                  </>
-                )}
-              </Button>
-              <Link href="/deck-builder">
-                <Button className="bg-gradient-to-r from-cosmic-blue to-cosmic-blue-light text-cosmic-silver font-bold px-8 py-4 rounded-xl border border-cosmic-gold transition-all duration-300 transform hover:scale-105">
-                  <i className="fas fa-layer-group mr-2"></i>Deck Builder
+      <main className="relative z-10 max-w-7xl mx-auto px-4 py-8">
+        {/* Hero Section */}
+        <div className="text-center mb-12">
+          <h1 className="text-5xl md:text-7xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-cosmic-gold to-cosmic-silver mb-6 animate-glow">
+            Welcome, Commander
+          </h1>
+          <p className="text-xl text-cosmic-silver mb-8 max-w-2xl mx-auto">
+            Ready your fleet and prepare for battle. The galaxy awaits your command.
+          </p>
+        </div>
+
+        {/* Quick Actions */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-12">
+          <Card className="bg-cosmic-blue/20 border-cosmic-gold/30 hover:border-cosmic-gold transition-colors cursor-pointer group">
+            <CardContent className="p-6 text-center">
+              <div className="w-16 h-16 bg-gradient-to-r from-red-500 to-red-600 rounded-full flex items-center justify-center mx-auto mb-4 group-hover:animate-pulse">
+                <i className="fas fa-robot text-white text-2xl"></i>
+              </div>
+              <h3 className="text-xl font-bold text-cosmic-gold mb-4">Quick Battle</h3>
+              <div className="space-y-2">
+                <Button 
+                  size="sm" 
+                  variant="outline"
+                  className="w-full"
+                  onClick={() => handleStartGame('Easy')}
+                >
+                  Easy AI
                 </Button>
-              </Link>
-              <Button 
-                onClick={() => setShowBoosterModal(true)}
-                className="bg-gradient-to-r from-purple-600 to-purple-700 text-white font-bold px-8 py-4 rounded-xl transition-all duration-300 transform hover:scale-105"
-              >
-                <i className="fas fa-gift mr-2"></i>Open Packs ({boosterPacks?.length || 0})
+                <Button 
+                  size="sm" 
+                  variant="outline"
+                  className="w-full"
+                  onClick={() => handleStartGame('Medium')}
+                >
+                  Medium AI
+                </Button>
+                <Button 
+                  size="sm" 
+                  variant="outline"
+                  className="w-full"
+                  onClick={() => handleStartGame('Hard')}
+                >
+                  Hard AI
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="bg-cosmic-blue/20 border-cosmic-gold/30 hover:border-cosmic-gold transition-colors cursor-pointer group">
+            <CardContent className="p-6 text-center">
+              <div className="w-16 h-16 bg-gradient-to-r from-cosmic-gold to-cosmic-gold/80 rounded-full flex items-center justify-center mx-auto mb-4 group-hover:animate-pulse">
+                <i className="fas fa-users text-cosmic-black text-2xl"></i>
+              </div>
+              <h3 className="text-xl font-bold text-cosmic-gold mb-2">Multiplayer</h3>
+              <p className="text-cosmic-silver mb-4">Challenge other commanders</p>
+              <Button className="w-full" disabled>
+                Coming Soon
               </Button>
+            </CardContent>
+          </Card>
+
+          <Card 
+            className="bg-cosmic-blue/20 border-cosmic-gold/30 hover:border-cosmic-gold transition-colors cursor-pointer group"
+            onClick={() => setLocation('/collection')}
+          >
+            <CardContent className="p-6 text-center">
+              <div className="w-16 h-16 bg-gradient-to-r from-blue-500 to-blue-600 rounded-full flex items-center justify-center mx-auto mb-4 group-hover:animate-pulse">
+                <i className="fas fa-layer-group text-white text-2xl"></i>
+              </div>
+              <h3 className="text-xl font-bold text-cosmic-gold mb-2">Collection</h3>
+              <p className="text-cosmic-silver mb-4">Browse your cards</p>
+              <Button className="w-full">
+                View Collection
+              </Button>
+            </CardContent>
+          </Card>
+
+          <Card 
+            className="bg-cosmic-blue/20 border-cosmic-gold/30 hover:border-cosmic-gold transition-colors cursor-pointer group"
+            onClick={() => setShowBoosterPack(true)}
+          >
+            <CardContent className="p-6 text-center">
+              <div className="w-16 h-16 bg-gradient-to-r from-purple-500 to-purple-600 rounded-full flex items-center justify-center mx-auto mb-4 group-hover:animate-pulse">
+                <i className="fas fa-gift text-white text-2xl"></i>
+              </div>
+              <h3 className="text-xl font-bold text-cosmic-gold mb-2">Booster Packs</h3>
+              <p className="text-cosmic-silver mb-4">
+                Unopened: {userBoosterPacks?.length || 0}
+              </p>
+              <Button className="w-full">
+                Open Packs
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Player Stats */}
+        <Card className="bg-cosmic-blue/20 border-cosmic-gold/30 mb-12">
+          <CardHeader>
+            <CardTitle className="text-cosmic-gold text-center">Commander Statistics</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-6 text-center">
+              <div>
+                <div className="text-3xl font-bold text-cosmic-gold">{user?.totalWins || 0}</div>
+                <div className="text-cosmic-silver">Total Wins</div>
+              </div>
+              <div>
+                <div className="text-3xl font-bold text-cosmic-gold">{winRate}%</div>
+                <div className="text-cosmic-silver">Win Rate</div>
+              </div>
+              <div>
+                <div className="text-3xl font-bold text-cosmic-gold">{user?.level || 1}</div>
+                <div className="text-cosmic-silver">Level</div>
+              </div>
+              <div>
+                <div className="text-3xl font-bold text-cosmic-gold">{user?.experience || 0}</div>
+                <div className="text-cosmic-silver">Experience</div>
+              </div>
             </div>
-          </div>
+          </CardContent>
+        </Card>
 
-          {/* Game Modes Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 mb-12">
-            <Card className="bg-gradient-to-br from-cosmic-800 to-cosmic-700 border border-cosmic-600 hover:border-cosmic-gold transition-all duration-300 transform hover:scale-105 cursor-pointer group">
-              <CardHeader className="text-center">
-                <div className="w-16 h-16 bg-gradient-to-r from-red-500 to-red-600 rounded-full flex items-center justify-center mx-auto mb-4 group-hover:animate-pulse">
-                  <i className="fas fa-sword text-white text-2xl"></i>
-                </div>
-                <CardTitle className="text-cosmic-gold">Quick Match</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-cosmic-silver mb-4 text-center">
-                  Jump into battle against AI opponents with varying difficulty levels
-                </p>
-                <div className="flex justify-center space-x-2">
-                  <span className="px-3 py-1 bg-green-600 text-white text-xs rounded-full">Easy</span>
-                  <span className="px-3 py-1 bg-yellow-600 text-white text-xs rounded-full">Medium</span>
-                  <span className="px-3 py-1 bg-red-600 text-white text-xs rounded-full">Hard</span>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="bg-gradient-to-br from-cosmic-800 to-cosmic-700 border border-cosmic-600 hover:border-cosmic-gold transition-all duration-300 transform hover:scale-105 cursor-pointer group">
-              <CardHeader className="text-center">
-                <div className="w-16 h-16 bg-gradient-to-r from-cosmic-gold to-cosmic-gold-dark rounded-full flex items-center justify-center mx-auto mb-4 group-hover:animate-pulse">
-                  <i className="fas fa-trophy text-cosmic-900 text-2xl"></i>
-                </div>
-                <CardTitle className="text-cosmic-gold">Ranked Battle</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-cosmic-silver mb-4 text-center">
-                  Compete against other commanders for galactic supremacy
-                </p>
-                <div className="flex justify-center">
-                  <span className="px-4 py-2 bg-gradient-to-r from-cosmic-gold to-cosmic-gold-dark text-cosmic-900 text-sm font-semibold rounded-full">
-                    Current Rank: {stats?.rank || "Recruit"}
-                  </span>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Link href="/collection">
-              <Card className="bg-gradient-to-br from-cosmic-800 to-cosmic-700 border border-cosmic-600 hover:border-cosmic-gold transition-all duration-300 transform hover:scale-105 cursor-pointer group">
-                <CardHeader className="text-center">
-                  <div className="w-16 h-16 bg-gradient-to-r from-blue-500 to-blue-600 rounded-full flex items-center justify-center mx-auto mb-4 group-hover:animate-pulse">
-                    <i className="fas fa-layer-group text-white text-2xl"></i>
-                  </div>
-                  <CardTitle className="text-cosmic-gold">Collection</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-cosmic-silver mb-4 text-center">
-                    Browse your card collection and manage your fleet
-                  </p>
-                  <div className="text-cosmic-gold font-semibold text-center">
-                    Cards Collected
-                  </div>
-                </CardContent>
-              </Card>
-            </Link>
-          </div>
-
-          {/* Player Stats Section */}
-          <Card className="bg-gradient-to-r from-cosmic-800/50 to-cosmic-700/50 border border-cosmic-600 mb-12">
+        {/* Recent Games & Leaderboard */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          <Card className="bg-cosmic-blue/20 border-cosmic-gold/30">
             <CardHeader>
-              <CardTitle className="text-2xl font-bold text-cosmic-gold text-center">Commander Statistics</CardTitle>
+              <CardTitle className="text-cosmic-gold">Recent Games</CardTitle>
             </CardHeader>
             <CardContent>
-              {statsLoading ? (
-                <div className="flex justify-center">
-                  <i className="fas fa-spinner fa-spin text-cosmic-gold text-2xl"></i>
+              {gamesLoading ? (
+                <div className="text-cosmic-silver">Loading games...</div>
+              ) : userGames?.length > 0 ? (
+                <div className="space-y-4">
+                  {userGames.slice(0, 5).map((game: any) => (
+                    <div key={game.id} className="flex items-center justify-between p-3 bg-cosmic-black/30 rounded">
+                      <div>
+                        <div className="text-cosmic-silver">
+                          {game.isAIGame ? `vs AI (${game.aiDifficulty})` : 'vs Player'}
+                        </div>
+                        <div className="text-xs text-cosmic-silver/70">
+                          {new Date(game.createdAt).toLocaleDateString()}
+                        </div>
+                      </div>
+                      <Badge variant={game.winnerId === user?.id ? "default" : "destructive"}>
+                        {game.winnerId === user?.id ? "Won" : "Lost"}
+                      </Badge>
+                    </div>
+                  ))}
                 </div>
               ) : (
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
-                  <div className="text-center">
-                    <div className="text-3xl font-bold text-cosmic-gold">{stats?.totalWins || 0}</div>
-                    <div className="text-cosmic-silver">Total Wins</div>
-                  </div>
-                  <div className="text-center">
-                    <div className="text-3xl font-bold text-cosmic-gold">{stats?.winRate || 0}%</div>
-                    <div className="text-cosmic-silver">Win Rate</div>
-                  </div>
-                  <div className="text-center">
-                    <div className="text-3xl font-bold text-cosmic-gold">{stats?.currentLevel || 1}</div>
-                    <div className="text-cosmic-silver">Level</div>
-                  </div>
-                  <div className="text-center">
-                    <div className="text-3xl font-bold text-cosmic-gold">{stats?.experience || 0}</div>
-                    <div className="text-cosmic-silver">Experience</div>
-                  </div>
+                <div className="text-cosmic-silver text-center py-8">
+                  No games played yet. Start your first battle!
                 </div>
               )}
             </CardContent>
           </Card>
 
-          {/* Quick Actions */}
-          <div className="flex justify-center space-x-4 mb-8">
-            <Button
-              onClick={buyBoosterPack}
-              disabled={!user || user.currency < 100 || buyBoosterPackMutation.isPending}
-              className="bg-cosmic-gold hover:bg-cosmic-gold-dark text-cosmic-900 font-semibold px-6 py-3 rounded-lg"
-            >
-              {buyBoosterPackMutation.isPending ? (
-                <>
-                  <i className="fas fa-spinner fa-spin mr-2"></i>Purchasing...
-                </>
+          <Card className="bg-cosmic-blue/20 border-cosmic-gold/30">
+            <CardHeader>
+              <CardTitle className="text-cosmic-gold">Leaderboard</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {leaderboardLoading ? (
+                <div className="text-cosmic-silver">Loading leaderboard...</div>
               ) : (
-                <>
-                  <i className="fas fa-shopping-cart mr-2"></i>Buy Booster Pack (100 Credits)
-                </>
+                <div className="space-y-3">
+                  {leaderboard?.slice(0, 10).map((player: any, index: number) => (
+                    <div key={player.id} className="flex items-center justify-between p-2 bg-cosmic-black/30 rounded">
+                      <div className="flex items-center space-x-3">
+                        <div className="text-cosmic-gold font-bold">#{index + 1}</div>
+                        <div>
+                          <div className="text-cosmic-silver">{player.username}</div>
+                          <div className="text-xs text-cosmic-silver/70">Level {player.level}</div>
+                        </div>
+                      </div>
+                      <div className="text-cosmic-gold font-semibold">{player.totalWins} wins</div>
+                    </div>
+                  ))}
+                </div>
               )}
-            </Button>
-          </div>
+            </CardContent>
+          </Card>
         </div>
       </main>
 
-      <BoosterPackModal 
-        isOpen={showBoosterModal} 
-        onClose={() => setShowBoosterModal(false)} 
-      />
+      {/* Booster Pack Modal */}
+      {showBoosterPack && (
+        <BoosterPack onClose={() => setShowBoosterPack(false)} />
+      )}
     </div>
   );
 }

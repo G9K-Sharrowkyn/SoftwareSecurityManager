@@ -3,24 +3,16 @@ import { createServer, type Server } from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import { storage } from "./storage";
 import { setupAuth, isAuthenticated } from "./replitAuth";
-import { GameEngine } from "./gameEngine";
-import { AIEngine } from "./aiEngine";
+import { insertCardSchema, insertDeckSchema, insertGameSchema } from "@shared/schema";
 import { z } from "zod";
-import { insertDeckSchema, insertGameSchema } from "@shared/schema";
 
-interface GameSocket extends WebSocket {
-  userId?: string;
+interface GameConnection {
+  socket: WebSocket;
+  userId: string;
   gameId?: string;
 }
 
-interface GameRoom {
-  id: string;
-  players: Map<string, GameSocket>;
-  engine: GameEngine;
-  aiEngine?: AIEngine;
-}
-
-const gameRooms = new Map<string, GameRoom>();
+const gameConnections = new Map<string, GameConnection>();
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Auth middleware
@@ -38,28 +30,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // User routes
-  app.patch('/api/users/profile', isAuthenticated, async (req: any, res) => {
-    try {
-      const userId = req.user.claims.sub;
-      const { username } = req.body;
-      
-      if (username) {
-        await storage.upsertUser({ id: userId, username });
-      }
-      
-      const user = await storage.getUser(userId);
-      res.json(user);
-    } catch (error) {
-      console.error("Error updating profile:", error);
-      res.status(500).json({ message: "Failed to update profile" });
-    }
-  });
-
   // Card routes
   app.get('/api/cards', async (req, res) => {
     try {
-      const cards = await storage.getAllCards();
+      const cards = await storage.getCards();
       res.json(cards);
     } catch (error) {
       console.error("Error fetching cards:", error);
@@ -67,14 +41,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get('/api/users/cards', isAuthenticated, async (req: any, res) => {
+  app.post('/api/cards', isAuthenticated, async (req, res) => {
+    try {
+      const cardData = insertCardSchema.parse(req.body);
+      const card = await storage.createCard(cardData);
+      res.json(card);
+    } catch (error) {
+      console.error("Error creating card:", error);
+      res.status(500).json({ message: "Failed to create card" });
+    }
+  });
+
+  // User collection routes
+  app.get('/api/collection', isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user.claims.sub;
-      const userCards = await storage.getUserCards(userId);
-      res.json(userCards);
+      const collection = await storage.getUserCards(userId);
+      res.json(collection);
     } catch (error) {
-      console.error("Error fetching user cards:", error);
-      res.status(500).json({ message: "Failed to fetch user cards" });
+      console.error("Error fetching collection:", error);
+      res.status(500).json({ message: "Failed to fetch collection" });
     }
   });
 
@@ -90,7 +76,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get('/api/decks/:id', isAuthenticated, async (req: any, res) => {
+  app.post('/api/decks', isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const deckData = insertDeckSchema.parse({ ...req.body, userId });
+      const deck = await storage.createDeck(deckData);
+      res.json(deck);
+    } catch (error) {
+      console.error("Error creating deck:", error);
+      res.status(500).json({ message: "Failed to create deck" });
+    }
+  });
+
+  app.get('/api/decks/:id', isAuthenticated, async (req, res) => {
     try {
       const deckId = parseInt(req.params.id);
       const deck = await storage.getDeck(deckId);
@@ -104,23 +102,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post('/api/decks', isAuthenticated, async (req: any, res) => {
-    try {
-      const userId = req.user.claims.sub;
-      const deckData = insertDeckSchema.parse({ ...req.body, userId });
-      const deck = await storage.createDeck(deckData);
-      res.json(deck);
-    } catch (error) {
-      console.error("Error creating deck:", error);
-      res.status(500).json({ message: "Failed to create deck" });
-    }
-  });
-
-  app.post('/api/decks/:id/cards', isAuthenticated, async (req: any, res) => {
+  app.post('/api/decks/:id/cards', isAuthenticated, async (req, res) => {
     try {
       const deckId = parseInt(req.params.id);
       const { cardId, quantity = 1 } = req.body;
-      
       const deckCard = await storage.addCardToDeck(deckId, cardId, quantity);
       res.json(deckCard);
     } catch (error) {
@@ -129,14 +114,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete('/api/decks/:id/cards/:cardId', isAuthenticated, async (req: any, res) => {
+  app.delete('/api/decks/:deckId/cards/:cardId', isAuthenticated, async (req, res) => {
     try {
-      const deckId = parseInt(req.params.id);
+      const deckId = parseInt(req.params.deckId);
       const cardId = parseInt(req.params.cardId);
-      const { quantity = 1 } = req.body;
-      
-      await storage.removeCardFromDeck(deckId, cardId, quantity);
-      res.json({ success: true });
+      await storage.removeCardFromDeck(deckId, cardId);
+      res.json({ message: "Card removed from deck" });
     } catch (error) {
       console.error("Error removing card from deck:", error);
       res.status(500).json({ message: "Failed to remove card from deck" });
@@ -147,21 +130,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post('/api/games', isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user.claims.sub;
-      const { gameType, aiDifficulty, deckId } = req.body;
-      
-      const gameData = {
+      const gameData = insertGameSchema.parse({ 
+        ...req.body, 
         player1Id: userId,
-        gameType,
-        status: "waiting" as const,
-        aiDifficulty: gameType === "AI" ? aiDifficulty : undefined,
-        gameState: { 
-          player1DeckId: deckId,
-          currentPlayerId: userId,
-          phase: "Command Phase",
-          turn: 1
+        gameState: {
+          player1: { health: 100, hand: [], units: [], commands: [], commandPoints: 0 },
+          player2: { health: 100, hand: [], units: [], commands: [], commandPoints: 0 },
+          currentPhase: "Command Phase",
+          turnNumber: 1
         }
-      };
-      
+      });
       const game = await storage.createGame(gameData);
       res.json(game);
     } catch (error) {
@@ -170,33 +148,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get('/api/games/active', isAuthenticated, async (req: any, res) => {
+  app.get('/api/games/:id', isAuthenticated, async (req, res) => {
     try {
-      const userId = req.user.claims.sub;
-      const games = await storage.getActiveGamesForUser(userId);
-      res.json(games);
+      const gameId = req.params.id;
+      const game = await storage.getGame(gameId);
+      if (!game) {
+        return res.status(404).json({ message: "Game not found" });
+      }
+      res.json(game);
     } catch (error) {
-      console.error("Error fetching active games:", error);
-      res.status(500).json({ message: "Failed to fetch active games" });
+      console.error("Error fetching game:", error);
+      res.status(500).json({ message: "Failed to fetch game" });
     }
   });
 
-  app.get('/api/games/history', isAuthenticated, async (req: any, res) => {
+  app.get('/api/games', isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user.claims.sub;
-      const limit = req.query.limit ? parseInt(req.query.limit as string) : 20;
-      const games = await storage.getGameHistory(userId, limit);
+      const games = await storage.getUserGames(userId);
       res.json(games);
     } catch (error) {
-      console.error("Error fetching game history:", error);
-      res.status(500).json({ message: "Failed to fetch game history" });
+      console.error("Error fetching games:", error);
+      res.status(500).json({ message: "Failed to fetch games" });
     }
   });
 
   // Booster pack routes
   app.get('/api/booster-packs', async (req, res) => {
     try {
-      const packs = await storage.getAllBoosterPacks();
+      const packs = await storage.getBoosterPacks();
       res.json(packs);
     } catch (error) {
       console.error("Error fetching booster packs:", error);
@@ -204,7 +184,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get('/api/users/booster-packs', isAuthenticated, async (req: any, res) => {
+  app.get('/api/user-booster-packs', isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user.claims.sub;
       const packs = await storage.getUserBoosterPacks(userId);
@@ -215,35 +195,52 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post('/api/booster-packs/:id/open', isAuthenticated, async (req: any, res) => {
+  app.post('/api/purchase-booster', isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user.claims.sub;
-      const packId = parseInt(req.params.id);
+      const { boosterPackId } = req.body;
+      const pack = await storage.purchaseBoosterPack(userId, boosterPackId);
+      res.json(pack);
+    } catch (error) {
+      console.error("Error purchasing booster pack:", error);
+      res.status(500).json({ message: "Failed to purchase booster pack" });
+    }
+  });
+
+  app.post('/api/open-booster/:id', isAuthenticated, async (req: any, res) => {
+    try {
+      const userBoosterPackId = parseInt(req.params.id);
+      const userId = req.user.claims.sub;
+      const cards = await storage.openBoosterPack(userBoosterPackId);
       
-      const revealedCards = await storage.openBoosterPack(userId, packId);
-      res.json({ cards: revealedCards });
+      // Add cards to user collection
+      for (const card of cards) {
+        await storage.addCardToUser(userId, card.id);
+      }
+      
+      res.json(cards);
     } catch (error) {
       console.error("Error opening booster pack:", error);
       res.status(500).json({ message: "Failed to open booster pack" });
     }
   });
 
-  // Rankings routes
-  app.get('/api/rankings', async (req, res) => {
+  // Leaderboard routes
+  app.get('/api/leaderboard', async (req, res) => {
     try {
-      const limit = req.query.limit ? parseInt(req.query.limit as string) : 50;
-      const topPlayers = await storage.getTopPlayers(limit);
-      res.json(topPlayers);
+      const leaderboard = await storage.getLeaderboard();
+      res.json(leaderboard);
     } catch (error) {
-      console.error("Error fetching rankings:", error);
-      res.status(500).json({ message: "Failed to fetch rankings" });
+      console.error("Error fetching leaderboard:", error);
+      res.status(500).json({ message: "Failed to fetch leaderboard" });
     }
   });
 
-  // Achievements routes
-  app.get('/api/achievements', async (req, res) => {
+  // Achievement routes
+  app.get('/api/achievements', isAuthenticated, async (req: any, res) => {
     try {
-      const achievements = await storage.getAllAchievements();
+      const userId = req.user.claims.sub;
+      const achievements = await storage.getUserAchievements(userId);
       res.json(achievements);
     } catch (error) {
       console.error("Error fetching achievements:", error);
@@ -251,216 +248,65 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get('/api/users/achievements', isAuthenticated, async (req: any, res) => {
-    try {
-      const userId = req.user.claims.sub;
-      const achievements = await storage.getUserAchievements(userId);
-      res.json(achievements);
-    } catch (error) {
-      console.error("Error fetching user achievements:", error);
-      res.status(500).json({ message: "Failed to fetch user achievements" });
-    }
-  });
-
   const httpServer = createServer(app);
 
-  // WebSocket server for real-time multiplayer
+  // WebSocket setup for real-time multiplayer
   const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
 
-  wss.on('connection', (ws: GameSocket, req) => {
-    console.log('WebSocket connection established');
-
-    ws.on('message', async (message: string) => {
+  wss.on('connection', (socket: WebSocket, request) => {
+    console.log('New WebSocket connection');
+    
+    socket.on('message', async (data) => {
       try {
-        const data = JSON.parse(message);
+        const message = JSON.parse(data.toString());
         
-        switch (data.type) {
+        switch (message.type) {
           case 'join_game':
-            await handleJoinGame(ws, data);
+            const { gameId, userId } = message;
+            gameConnections.set(userId, { socket, userId, gameId });
+            socket.send(JSON.stringify({ type: 'joined_game', gameId }));
             break;
-          case 'game_action':
-            await handleGameAction(ws, data);
+            
+          case 'game_move':
+            const { move, gameId: moveGameId } = message;
+            // Broadcast move to other players in the game
+            for (const [connUserId, conn] of gameConnections) {
+              if (conn.gameId === moveGameId && conn.socket !== socket && conn.socket.readyState === WebSocket.OPEN) {
+                conn.socket.send(JSON.stringify({ type: 'opponent_move', move }));
+              }
+            }
             break;
+            
           case 'chat_message':
-            await handleChatMessage(ws, data);
+            const { gameId: chatGameId, message: chatMessage, sender } = message;
+            // Broadcast chat to other players in the game
+            for (const [connUserId, conn] of gameConnections) {
+              if (conn.gameId === chatGameId && conn.socket.readyState === WebSocket.OPEN) {
+                conn.socket.send(JSON.stringify({ 
+                  type: 'chat_message', 
+                  message: chatMessage, 
+                  sender, 
+                  timestamp: new Date().toISOString() 
+                }));
+              }
+            }
             break;
         }
       } catch (error) {
         console.error('WebSocket message error:', error);
-        ws.send(JSON.stringify({ type: 'error', message: 'Invalid message format' }));
       }
     });
 
-    ws.on('close', () => {
-      // Clean up game rooms when player disconnects
-      if (ws.gameId && ws.userId) {
-        const room = gameRooms.get(ws.gameId);
-        if (room) {
-          room.players.delete(ws.userId);
-          if (room.players.size === 0) {
-            gameRooms.delete(ws.gameId);
-          }
+    socket.on('close', () => {
+      // Remove connection
+      for (const [userId, conn] of gameConnections) {
+        if (conn.socket === socket) {
+          gameConnections.delete(userId);
+          break;
         }
       }
     });
   });
-
-  async function handleJoinGame(ws: GameSocket, data: any) {
-    const { gameId, userId } = data;
-    
-    try {
-      const game = await storage.getGame(gameId);
-      if (!game) {
-        ws.send(JSON.stringify({ type: 'error', message: 'Game not found' }));
-        return;
-      }
-
-      // Create or get game room
-      let room = gameRooms.get(gameId);
-      if (!room) {
-        const engine = new GameEngine(storage);
-        await engine.initializeGame(game);
-        
-        room = {
-          id: gameId,
-          players: new Map(),
-          engine,
-          aiEngine: game.gameType === "AI" ? new AIEngine(game.aiDifficulty || "Medium") : undefined
-        };
-        gameRooms.set(gameId, room);
-      }
-
-      ws.userId = userId;
-      ws.gameId = gameId;
-      room.players.set(userId, ws);
-
-      // Send initial game state
-      const gameState = await room.engine.getGameState();
-      ws.send(JSON.stringify({ 
-        type: 'game_state', 
-        state: gameState 
-      }));
-
-      // If AI game and it's AI's turn, make AI move
-      if (room.aiEngine && gameState.currentPlayerId !== userId) {
-        setTimeout(async () => {
-          const aiMove = await room!.aiEngine!.makeMove(gameState);
-          if (aiMove) {
-            await room!.engine.processMove(aiMove);
-            broadcastGameState(room!);
-          }
-        }, 1000);
-      }
-
-    } catch (error) {
-      console.error('Error joining game:', error);
-      ws.send(JSON.stringify({ type: 'error', message: 'Failed to join game' }));
-    }
-  }
-
-  async function handleGameAction(ws: GameSocket, data: any) {
-    if (!ws.gameId || !ws.userId) return;
-
-    const room = gameRooms.get(ws.gameId);
-    if (!room) return;
-
-    try {
-      const result = await room.engine.processMove({
-        playerId: ws.userId,
-        action: data.action,
-        data: data.actionData
-      });
-
-      if (result.success) {
-        broadcastGameState(room);
-        
-        // Check for game end
-        if (result.gameEnded) {
-          await storage.updateGame(ws.gameId, {
-            status: "finished",
-            winnerId: result.winnerId,
-            finishedAt: new Date()
-          });
-          
-          // Update player stats
-          if (result.winnerId) {
-            const winner = await storage.getUser(result.winnerId);
-            if (winner) {
-              await storage.updateUserStats(result.winnerId, {
-                gamesPlayed: winner.gamesPlayed + 1,
-                gamesWon: winner.gamesWon + 1,
-                experience: winner.experience + 100
-              });
-            }
-          }
-        }
-        
-        // If AI game and it's AI's turn, make AI move
-        if (room.aiEngine && !result.gameEnded) {
-          setTimeout(async () => {
-            const gameState = await room!.engine.getGameState();
-            if (gameState.currentPlayerId !== ws.userId) {
-              const aiMove = await room!.aiEngine!.makeMove(gameState);
-              if (aiMove) {
-                await room!.engine.processMove(aiMove);
-                broadcastGameState(room!);
-              }
-            }
-          }, 1500);
-        }
-      } else {
-        ws.send(JSON.stringify({ 
-          type: 'error', 
-          message: result.error || 'Invalid move' 
-        }));
-      }
-    } catch (error) {
-      console.error('Error processing game action:', error);
-      ws.send(JSON.stringify({ type: 'error', message: 'Failed to process action' }));
-    }
-  }
-
-  async function handleChatMessage(ws: GameSocket, data: any) {
-    if (!ws.gameId || !ws.userId) return;
-
-    const room = gameRooms.get(ws.gameId);
-    if (!room) return;
-
-    const user = await storage.getUser(ws.userId);
-    if (!user) return;
-
-    const chatMessage = {
-      type: 'chat_message',
-      message: {
-        userId: ws.userId,
-        username: user.username,
-        content: data.message,
-        timestamp: new Date().toISOString()
-      }
-    };
-
-    // Broadcast to all players in the game
-    room.players.forEach(player => {
-      if (player.readyState === WebSocket.OPEN) {
-        player.send(JSON.stringify(chatMessage));
-      }
-    });
-  }
-
-  function broadcastGameState(room: GameRoom) {
-    room.engine.getGameState().then(gameState => {
-      const message = JSON.stringify({ 
-        type: 'game_state', 
-        state: gameState 
-      });
-      
-      room.players.forEach(player => {
-        if (player.readyState === WebSocket.OPEN) {
-          player.send(message);
-        }
-      });
-    });
-  }
 
   return httpServer;
 }
