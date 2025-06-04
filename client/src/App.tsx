@@ -9,6 +9,7 @@ import GameLobby from "@/pages/GameLobby";
 import GameRoom from "@/pages/GameRoom";
 import Collection from "@/pages/Collection";
 import DeckBuilder from "@/pages/DeckBuilder";
+import Profile from "@/pages/Profile";
 import NotFound from "@/pages/not-found";
 import Navigation from "@/components/layout/Navigation";
 import StarBackground from "@/components/layout/StarBackground";
@@ -38,6 +39,7 @@ function Router() {
             <Route path="/game/:gameId" component={GameRoom} />
             <Route path="/collection" component={Collection} />
             <Route path="/deck-builder" component={DeckBuilder} />
+            <Route path="/profile" component={Profile} />
           </>
         )}
         <Route component={NotFound} />

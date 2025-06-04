@@ -37,6 +37,7 @@ export interface IStorage {
   upsertUser(user: UpsertUser): Promise<User>;
   getUserByUsername(username: string): Promise<User | undefined>;
   updateUserStats(userId: string, stats: { gamesPlayed?: number; gamesWon?: number; experience?: number; level?: number; credits?: number }): Promise<void>;
+  updateUserProfile(userId: string, updates: Partial<Omit<UpsertUser, "id">>): Promise<User>;
 
   // Card operations
   getAllCards(): Promise<Card[]>;
@@ -110,6 +111,15 @@ export class DatabaseStorage implements IStorage {
     await db.update(users)
       .set({ ...stats, updatedAt: new Date() })
       .where(eq(users.id, userId));
+  }
+
+  async updateUserProfile(userId: string, updates: Partial<Omit<UpsertUser, "id">>): Promise<User> {
+    const [updated] = await db
+      .update(users)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(users.id, userId))
+      .returning();
+    return updated;
   }
 
   // Card operations
