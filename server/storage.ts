@@ -25,6 +25,11 @@ export interface IStorage {
   // User operations (mandatory for Replit Auth)
   getUser(id: string): Promise<User | undefined>;
   upsertUser(user: UpsertUser): Promise<User>;
+  getUserByUsername(username: string): Promise<User | undefined>;
+  updateUserStats(userId: string, stats: { gamesPlayed?: number; gamesWon?: number; experience?: number; level?: number; credits?: number }): Promise<void>;
+  updateUserProfile(userId: string, updates: Partial<Omit<UpsertUser, "id">>): Promise<User>;
+
+=======
   
   // Card operations
   getAllCards(): Promise<Card[]>;
@@ -81,6 +86,26 @@ export class DatabaseStorage implements IStorage {
       })
       .returning();
     return user;
+  }
+
+  async getUserByUsername(username: string): Promise<User | undefined> {
+    const [user] = await db.select().from(users).where(eq(users.username, username));
+    return user;
+  }
+
+  async updateUserStats(userId: string, stats: { gamesPlayed?: number; gamesWon?: number; experience?: number; level?: number; credits?: number }): Promise<void> {
+    await db.update(users)
+      .set({ ...stats, updatedAt: new Date() })
+      .where(eq(users.id, userId));
+  }
+
+  async updateUserProfile(userId: string, updates: Partial<Omit<UpsertUser, "id">>): Promise<User> {
+    const [updated] = await db
+      .update(users)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(users.id, userId))
+      .returning();
+    return updated;
   }
 
   // Card operations
