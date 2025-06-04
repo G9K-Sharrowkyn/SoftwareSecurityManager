@@ -1,0 +1,175 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: 240 10% 3.9%;
+  --foreground: 0 0% 98%;
+  --card: 240 10% 3.9%;
+  --card-foreground: 0 0% 98%;
+  --popover: 240 10% 3.9%;
+  --popover-foreground: 0 0% 98%;
+  --primary: 48 96% 53%;
+  --primary-foreground: 220 26% 14%;
+  --secondary: 240 3.7% 15.9%;
+  --secondary-foreground: 0 0% 98%;
+  --muted: 240 3.7% 15.9%;
+  --muted-foreground: 240 5% 64.9%;
+  --accent: 240 3.7% 15.9%;
+  --accent-foreground: 0 0% 98%;
+  --destructive: 0 62.8% 30.6%;
+  --destructive-foreground: 0 0% 98%;
+  --border: 240 3.7% 15.9%;
+  --input: 240 3.7% 15.9%;
+  --ring: 48 96% 53%;
+  --radius: 0.75rem;
+  
+  /* Custom cosmic colors */
+  --cosmic-black: 240 100% 3%;
+  --cosmic-blue: 230 35% 7%;
+  --cosmic-blue-light: 230 28% 12%;
+  --cosmic-gold: 48 96% 53%;
+  --cosmic-gold-dark: 45 93% 47%;
+  --cosmic-silver: 220 8% 46%;
+  --cosmic-purple: 263 85% 60%;
+  --cosmic-teal: 187 85% 53%;
+}
+
+.dark {
+  --background: 240 10% 3.9%;
+  --foreground: 0 0% 98%;
+  --card: 240 10% 3.9%;
+  --card-foreground: 0 0% 98%;
+  --popover: 240 10% 3.9%;
+  --popover-foreground: 0 0% 98%;
+  --primary: 48 96% 53%;
+  --primary-foreground: 220 26% 14%;
+  --secondary: 240 3.7% 15.9%;
+  --secondary-foreground: 0 0% 98%;
+  --muted: 240 3.7% 15.9%;
+  --muted-foreground: 240 5% 64.9%;
+  --accent: 240 3.7% 15.9%;
+  --accent-foreground: 0 0% 98%;
+  --destructive: 0 62.8% 30.6%;
+  --destructive-foreground: 0 0% 98%;
+  --border: 240 3.7% 15.9%;
+  --input: 240 3.7% 15.9%;
+  --ring: 48 96% 53%;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply font-sans antialiased;
+    background: radial-gradient(ellipse at bottom, hsl(var(--cosmic-blue)) 0%, hsl(var(--cosmic-black)) 100%);
+    color: hsl(var(--foreground));
+    min-height: 100vh;
+  }
+}
+
+@layer components {
+  .cosmic-gradient {
+    background: linear-gradient(135deg, hsl(var(--cosmic-blue)) 0%, hsl(var(--cosmic-black)) 100%);
+  }
+  
+  .card-hover {
+    @apply transition-all duration-300 hover:scale-105 hover:-translate-y-1;
+  }
+  
+  .card-selected {
+    @apply ring-2 ring-primary shadow-lg shadow-primary/50;
+  }
+  
+  .zone-highlight {
+    @apply border-primary/50 bg-primary/10;
+  }
+  
+  .glow-effect {
+    box-shadow: 0 0 20px hsl(var(--cosmic-gold) / 0.3);
+  }
+  
+  .glow-effect:hover {
+    box-shadow: 0 0 30px hsl(var(--cosmic-gold) / 0.5);
+  }
+}
+
+@layer utilities {
+  .animate-float {
+    animation: float 3s ease-in-out infinite;
+  }
+  
+  .animate-glow {
+    animation: glow 2s ease-in-out infinite alternate;
+  }
+  
+  .animate-starfield {
+    animation: starfield 20s linear infinite;
+  }
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-10px); }
+}
+
+@keyframes glow {
+  0% { text-shadow: 0 0 20px hsl(var(--cosmic-gold) / 0.8); }
+  100% { text-shadow: 0 0 30px hsl(var(--cosmic-gold) / 1); }
+}
+
+@keyframes starfield {
+  0% { transform: translateY(0px); }
+  100% { transform: translateY(-100vh); }
+}
+
+/* Star background */
+.stars {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 200vh;
+  pointer-events: none;
+  z-index: -1;
+}
+
+.star {
+  position: absolute;
+  background: white;
+  border-radius: 50%;
+  opacity: 0.8;
+  animation: starfield 20s linear infinite;
+}
+
+/* Card animations */
+.card-flip {
+  animation: cardFlip 0.6s ease-in-out;
+}
+
+@keyframes cardFlip {
+  0% { transform: rotateY(0deg); }
+  50% { transform: rotateY(90deg); }
+  100% { transform: rotateY(0deg); }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: hsl(var(--cosmic-black));
+}
+
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--cosmic-gold));
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--cosmic-gold-dark));
+}
