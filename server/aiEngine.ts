@@ -1,313 +1,258 @@
 import { GameState, PlayerState, GameMove } from "./gameEngine";
-import { Card } from "@shared/schema";
 
-interface AIMove {
-  type: string;
-  data: any;
-  priority: number;
-}
+export type AIDifficulty = "Easy" | "Medium" | "Hard";
 
-class AIEngine {
-  calculateMove(gameState: GameState, difficulty: string): { type: string; data: any } {
-    const aiPlayer = gameState.players["ai"];
-    const humanPlayer = gameState.players[Object.keys(gameState.players).find(id => id !== "ai") || ""];
+export class AIEngine {
+  private difficulty: AIDifficulty;
 
-    if (!aiPlayer || !humanPlayer) {
-      return { type: "end_phase", data: {} };
-    }
-
-    const possibleMoves = this.generatePossibleMoves(gameState, aiPlayer);
-    
-    switch (difficulty) {
-      case "Easy":
-        return this.selectRandomMove(possibleMoves);
-      case "Medium":
-        return this.selectStrategicMove(possibleMoves, gameState, aiPlayer, humanPlayer);
-      case "Hard":
-        return this.selectOptimalMove(possibleMoves, gameState, aiPlayer, humanPlayer);
-      default:
-        return this.selectRandomMove(possibleMoves);
-    }
+  constructor(difficulty: AIDifficulty) {
+    this.difficulty = difficulty;
   }
 
-  private generatePossibleMoves(gameState: GameState, aiPlayer: PlayerState): AIMove[] {
-    const moves: AIMove[] = [];
+  async makeMove(gameState: GameState): Promise<GameMove | null> {
+    const aiPlayer = this.getAIPlayer(gameState);
+    if (!aiPlayer) return null;
 
     switch (gameState.currentPhase) {
-      case "Command":
-        // Draw card if available
-        if (!aiPlayer.hasDrawnCard && aiPlayer.deck.length > 0) {
-          moves.push({ type: "draw_card", data: {}, priority: 8 });
-        }
-
-        // Play shipyard cards
-        const shipyardCards = aiPlayer.hand.filter(card => card.type.includes("Shipyard"));
-        shipyardCards.forEach(card => {
-          if (!aiPlayer.hasPlayedCommandCard) {
-            moves.push({
-              type: "play_card",
-              data: { cardId: card.id, zone: "command" },
-              priority: 7
-            });
-          }
-        });
-
-        // End phase
-        moves.push({ type: "end_phase", data: {}, priority: 1 });
-        break;
-
-      case "Deployment":
-        // Play unit cards
-        const affordableUnits = aiPlayer.hand.filter(card => 
-          card.type === "Unit" && card.commandCost <= aiPlayer.commandPoints
-        );
-        affordableUnits.forEach(card => {
-          const priority = this.calculateUnitPriority(card, gameState, aiPlayer);
-          moves.push({
-            type: "play_card",
-            data: { cardId: card.id, zone: "unit" },
-            priority
-          });
-        });
-
-        // Play command cards
-        const affordableCommands = aiPlayer.hand.filter(card => 
-          card.type === "Command" && card.commandCost <= aiPlayer.commandPoints
-        );
-        affordableCommands.forEach(card => {
-          const priority = this.calculateCommandPriority(card, gameState, aiPlayer);
-          moves.push({
-            type: "play_card",
-            data: { cardId: card.id, zone: "command" },
-            priority
-          });
-        });
-
-        // End phase
-        moves.push({ type: "end_phase", data: {}, priority: 2 });
-        break;
-
-      case "Battle":
-        // Attack with units
-        aiPlayer.unitZone.forEach(unit => {
-          // Direct attack
-          moves.push({
-            type: "attack",
-            data: { attackerId: unit.id },
-            priority: this.calculateAttackPriority(unit, gameState, aiPlayer)
-          });
-
-          // Attack enemy units
-          const enemyPlayer = this.getEnemyPlayer(gameState, aiPlayer.id);
-          enemyPlayer.unitZone.forEach(target => {
-            moves.push({
-              type: "attack",
-              data: { attackerId: unit.id, targetId: target.id },
-              priority: this.calculateCombatPriority(unit, target)
-            });
-          });
-        });
-
-        // End phase
-        moves.push({ type: "end_phase", data: {}, priority: 1 });
-        break;
-
+      case "Command Phase":
+        return this.makeCommandPhaseMove(aiPlayer, gameState);
+      case "Deployment Phase":
+        return this.makeDeploymentPhaseMove(aiPlayer, gameState);
+      case "Battle Phase":
+        return this.makeBattlePhaseMove(aiPlayer, gameState);
+      case "End Turn":
+        return { playerId: "AI", action: "end_turn" };
       default:
-        moves.push({ type: "end_phase", data: {}, priority: 1 });
+        return { playerId: "AI", action: "end_phase" };
     }
-
-    return moves;
   }
 
-  private selectRandomMove(moves: AIMove[]): { type: string; data: any } {
-    if (moves.length === 0) {
-      return { type: "end_phase", data: {} };
-    }
-    
-    const randomMove = moves[Math.floor(Math.random() * moves.length)];
-    return { type: randomMove.type, data: randomMove.data };
+  private getAIPlayer(gameState: GameState): PlayerState | null {
+    return gameState.players["AI"] || null;
   }
 
-  private selectStrategicMove(moves: AIMove[], gameState: GameState, aiPlayer: PlayerState, humanPlayer: PlayerState): { type: string; data: any } {
-    if (moves.length === 0) {
-      return { type: "end_phase", data: {} };
+  private makeCommandPhaseMove(aiPlayer: PlayerState, gameState: GameState): GameMove {
+    // AI strategy for command phase
+    if (!aiPlayer.hasDrawnCard && aiPlayer.deck.length > 0) {
+      // Always draw a card if possible
+      return { playerId: "AI", action: "draw_card" };
     }
 
-    // Apply basic strategy: prefer higher priority moves
-    moves.sort((a, b) => b.priority - a.priority);
-    
-    // Add some randomness to make AI less predictable
-    const topMoves = moves.slice(0, Math.min(3, moves.length));
-    const selectedMove = topMoves[Math.floor(Math.random() * topMoves.length)];
-    
-    return { type: selectedMove.type, data: selectedMove.data };
-  }
+    if (!aiPlayer.hasPlayedCommandCard) {
+      // Try to play a command card
+      const commandCards = aiPlayer.hand.filter(card => 
+        card.type.includes("Shipyard") || this.isCommandCard(card)
+      );
 
-  private selectOptimalMove(moves: AIMove[], gameState: GameState, aiPlayer: PlayerState, humanPlayer: PlayerState): { type: string; data: any } {
-    if (moves.length === 0) {
-      return { type: "end_phase", data: {} };
-    }
-
-    // Advanced strategy considerations
-    let bestMove = moves[0];
-    let bestScore = -Infinity;
-
-    for (const move of moves) {
-      let score = move.priority;
-
-      // Evaluate game state after this move
-      score += this.evaluateGameState(gameState, aiPlayer, humanPlayer);
-      
-      // Bonus for aggressive plays when ahead
-      if (aiPlayer.health > humanPlayer.health && move.type === "attack") {
-        score += 2;
+      if (commandCards.length > 0) {
+        const cardIndex = aiPlayer.hand.indexOf(commandCards[0]);
+        return {
+          playerId: "AI",
+          action: "play_card",
+          data: { cardIndex, zone: "command" }
+        };
       }
+    }
+
+    // End phase if nothing else to do
+    return { playerId: "AI", action: "end_phase" };
+  }
+
+  private makeDeploymentPhaseMove(aiPlayer: PlayerState, gameState: GameState): GameMove {
+    // AI strategy for deployment phase
+    const deployableUnits = aiPlayer.hand.filter(card => 
+      this.isUnitCard(card) && card.commandCost <= aiPlayer.commandPoints
+    );
+
+    if (deployableUnits.length > 0) {
+      // Deploy strongest affordable unit based on difficulty
+      let selectedCard;
       
-      // Bonus for defensive plays when behind
-      if (aiPlayer.health < humanPlayer.health && move.type === "play_card") {
-        const card = aiPlayer.hand.find(c => c.id === move.data.cardId);
-        if (card && card.defense > card.attack) {
-          score += 3;
+      switch (this.difficulty) {
+        case "Easy":
+          // Random selection
+          selectedCard = deployableUnits[Math.floor(Math.random() * deployableUnits.length)];
+          break;
+        case "Medium":
+          // Prefer higher attack
+          selectedCard = deployableUnits.sort((a, b) => b.attack - a.attack)[0];
+          break;
+        case "Hard":
+          // Optimal cost-to-power ratio
+          selectedCard = deployableUnits.sort((a, b) => {
+            const ratioA = (a.attack + a.defense) / Math.max(a.commandCost, 1);
+            const ratioB = (b.attack + b.defense) / Math.max(b.commandCost, 1);
+            return ratioB - ratioA;
+          })[0];
+          break;
+      }
+
+      const cardIndex = aiPlayer.hand.indexOf(selectedCard);
+      return {
+        playerId: "AI",
+        action: "play_card",
+        data: { cardIndex, zone: "unit" }
+      };
+    }
+
+    // End phase if no units to deploy
+    return { playerId: "AI", action: "end_phase" };
+  }
+
+  private makeBattlePhaseMove(aiPlayer: PlayerState, gameState: GameState): GameMove {
+    // AI strategy for battle phase
+    if (aiPlayer.unitZone.length === 0) {
+      return { playerId: "AI", action: "end_phase" };
+    }
+
+    const opponents = Object.values(gameState.players).filter(p => p.id !== "AI");
+    const target = opponents[0]; // For now, target first opponent
+
+    if (!target) {
+      return { playerId: "AI", action: "end_phase" };
+    }
+
+    // Choose attack strategy based on difficulty
+    switch (this.difficulty) {
+      case "Easy":
+        return this.makeEasyAttack(aiPlayer, target);
+      case "Medium":
+        return this.makeMediumAttack(aiPlayer, target);
+      case "Hard":
+        return this.makeHardAttack(aiPlayer, target);
+      default:
+        return { playerId: "AI", action: "end_phase" };
+    }
+  }
+
+  private makeEasyAttack(aiPlayer: PlayerState, target: PlayerState): GameMove {
+    // Easy AI: Random attacks
+    const attackerIndex = Math.floor(Math.random() * aiPlayer.unitZone.length);
+    
+    if (target.unitZone.length > 0 && Math.random() > 0.5) {
+      // Attack random unit
+      const targetIndex = Math.floor(Math.random() * target.unitZone.length);
+      return {
+        playerId: "AI",
+        action: "attack",
+        data: { attackerIndex, targetPlayerId: target.id, targetIndex }
+      };
+    } else {
+      // Direct attack
+      return {
+        playerId: "AI",
+        action: "attack",
+        data: { attackerIndex, targetPlayerId: target.id }
+      };
+    }
+  }
+
+  private makeMediumAttack(aiPlayer: PlayerState, target: PlayerState): GameMove {
+    // Medium AI: Prefer favorable trades or direct attacks
+    for (let i = 0; i < aiPlayer.unitZone.length; i++) {
+      const attacker = aiPlayer.unitZone[i];
+      
+      // Look for favorable unit trades
+      for (let j = 0; j < target.unitZone.length; j++) {
+        const defender = target.unitZone[j];
+        
+        if (attacker.attack >= defender.defense && 
+            (defender.attack < attacker.defense || attacker.attack > defender.attack)) {
+          // Favorable trade
+          return {
+            playerId: "AI",
+            action: "attack",
+            data: { attackerIndex: i, targetPlayerId: target.id, targetIndex: j }
+          };
+        }
+      }
+    }
+
+    // If no favorable trades, direct attack with strongest unit
+    const strongestIndex = aiPlayer.unitZone.reduce((maxIndex, unit, index, array) => 
+      unit.attack > array[maxIndex].attack ? index : maxIndex, 0);
+
+    return {
+      playerId: "AI",
+      action: "attack",
+      data: { attackerIndex: strongestIndex, targetPlayerId: target.id }
+    };
+  }
+
+  private makeHardAttack(aiPlayer: PlayerState, target: PlayerState): GameMove {
+    // Hard AI: Calculate optimal attacks considering all possibilities
+    const bestMove = this.calculateBestAttack(aiPlayer, target);
+    
+    if (bestMove) {
+      return {
+        playerId: "AI",
+        action: "attack",
+        data: bestMove
+      };
+    }
+
+    return { playerId: "AI", action: "end_phase" };
+  }
+
+  private calculateBestAttack(aiPlayer: PlayerState, target: PlayerState): any {
+    let bestScore = -Infinity;
+    let bestMove = null;
+
+    for (let i = 0; i < aiPlayer.unitZone.length; i++) {
+      const attacker = aiPlayer.unitZone[i];
+
+      // Consider attacking each enemy unit
+      for (let j = 0; j < target.unitZone.length; j++) {
+        const defender = target.unitZone[j];
+        const score = this.evaluateAttack(attacker, defender, true);
+        
+        if (score > bestScore) {
+          bestScore = score;
+          bestMove = { attackerIndex: i, targetPlayerId: target.id, targetIndex: j };
         }
       }
 
-      // Prefer finishing moves
-      if (move.type === "attack" && humanPlayer.health <= 10) {
-        score += 10;
-      }
-
-      if (score > bestScore) {
-        bestScore = score;
-        bestMove = move;
+      // Consider direct attack
+      const directScore = this.evaluateDirectAttack(attacker, target);
+      if (directScore > bestScore) {
+        bestScore = directScore;
+        bestMove = { attackerIndex: i, targetPlayerId: target.id };
       }
     }
 
-    return { type: bestMove.type, data: bestMove.data };
+    return bestMove;
   }
 
-  private calculateUnitPriority(card: Card, gameState: GameState, aiPlayer: PlayerState): number {
-    let priority = 5;
-    
-    // Prefer cost-efficient units
-    priority += (card.attack + card.defense) / Math.max(card.commandCost, 1);
-    
-    // Prefer low-cost units early game
-    if (gameState.turnNumber <= 3 && card.commandCost <= 3) {
-      priority += 2;
-    }
-    
-    // Prefer high-power units late game
-    if (gameState.turnNumber > 5 && card.attack >= 5) {
-      priority += 3;
-    }
-    
-    return priority;
-  }
-
-  private calculateCommandPriority(card: Card, gameState: GameState, aiPlayer: PlayerState): number {
-    let priority = 4;
-    
-    // Prefer card draw when hand is small
-    if (card.name.includes("Draw") && aiPlayer.hand.length <= 3) {
-      priority += 4;
-    }
-    
-    // Prefer damage spells when enemy is low on health
-    const enemyPlayer = this.getEnemyPlayer(gameState, aiPlayer.id);
-    if (card.name.includes("Strike") && enemyPlayer.health <= 20) {
-      priority += 5;
-    }
-    
-    return priority;
-  }
-
-  private calculateAttackPriority(unit: Card, gameState: GameState, aiPlayer: PlayerState): number {
-    let priority = 3;
-    
-    const enemyPlayer = this.getEnemyPlayer(gameState, aiPlayer.id);
-    
-    // Prefer direct attack when enemy has no units
-    if (enemyPlayer.unitZone.length === 0) {
-      priority += 5;
-    }
-    
-    // Prefer direct attack when it would win the game
-    if (unit.attack >= enemyPlayer.health) {
-      priority += 20;
-    }
-    
-    return priority;
-  }
-
-  private calculateCombatPriority(attacker: Card, defender: Card): number {
-    let priority = 2;
-    
-    // Prefer favorable trades
-    if (attacker.attack >= defender.defense && attacker.defense > defender.attack) {
-      priority += 8; // Favorable trade
-    } else if (attacker.attack >= defender.defense) {
-      priority += 4; // Can destroy defender
-    } else if (attacker.defense <= defender.attack) {
-      priority -= 3; // Will lose own unit
-    }
-    
-    // Prefer attacking high-value targets
-    priority += (defender.attack + defender.defense) / 4;
-    
-    return priority;
-  }
-
-  private evaluateGameState(gameState: GameState, aiPlayer: PlayerState, humanPlayer: PlayerState): number {
+  private evaluateAttack(attacker: any, defender: any, isUnitTarget: boolean): number {
     let score = 0;
-    
-    // Health advantage
-    score += (aiPlayer.health - humanPlayer.health) / 10;
-    
-    // Board presence
-    const aiUnitsValue = aiPlayer.unitZone.reduce((sum, unit) => sum + unit.attack + unit.defense, 0);
-    const humanUnitsValue = humanPlayer.unitZone.reduce((sum, unit) => sum + unit.attack + unit.defense, 0);
-    score += (aiUnitsValue - humanUnitsValue) / 5;
-    
-    // Card advantage
-    score += (aiPlayer.hand.length - humanPlayer.hand.length);
-    
-    // Command point advantage
-    score += (aiPlayer.commandPoints - humanPlayer.commandPoints) / 2;
-    
+
+    if (isUnitTarget) {
+      // Score for destroying enemy unit
+      if (attacker.attack >= defender.defense) {
+        score += defender.attack + defender.defense; // Value of destroyed unit
+      }
+
+      // Penalty for losing our unit
+      if (defender.attack >= attacker.defense) {
+        score -= attacker.attack + attacker.defense;
+      }
+    }
+
     return score;
   }
 
-  private getEnemyPlayer(gameState: GameState, playerId: string): PlayerState {
-    const enemyId = Object.keys(gameState.players).find(id => id !== playerId);
-    return gameState.players[enemyId || ""];
+  private evaluateDirectAttack(attacker: any, target: PlayerState): number {
+    // Simple evaluation: damage dealt to player
+    return attacker.attack;
   }
 
-  // Difficulty-based decision making
-  shouldPlayCard(card: Card, gameState: GameState, difficulty: string): boolean {
-    switch (difficulty) {
-      case "Easy":
-        return Math.random() > 0.3; // Often skips optimal plays
-      case "Medium":
-        return Math.random() > 0.1; // Occasionally makes suboptimal plays
-      case "Hard":
-        return true; // Always makes calculated decisions
-      default:
-        return Math.random() > 0.5;
-    }
+  private isCommandCard(card: any): boolean {
+    return !this.isUnitCard(card) && !card.type.includes("Shipyard");
   }
 
-  getReactionTime(difficulty: string): number {
-    switch (difficulty) {
-      case "Easy":
-        return 2000 + Math.random() * 3000; // 2-5 seconds
-      case "Medium":
-        return 1000 + Math.random() * 2000; // 1-3 seconds
-      case "Hard":
-        return 500 + Math.random() * 1000; // 0.5-1.5 seconds
-      default:
-        return 2000;
-    }
+  private isUnitCard(card: any): boolean {
+    return card.type.includes("Unit") || 
+           card.type.includes("Machine") || 
+           card.type.includes("Biological");
   }
 }
-
-export const aiEngine = new AIEngine();
