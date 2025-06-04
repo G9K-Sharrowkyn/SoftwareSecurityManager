@@ -3,70 +3,84 @@ import {
   cards,
   userCards,
   decks,
+  deckCards,
   games,
-  userBoosterPacks,
+  gameMoves,
   achievements,
   userAchievements,
+  boosterPacks,
+  userBoosterPacks,
   type User,
   type UpsertUser,
   type Card,
+  type InsertCard,
   type UserCard,
   type InsertUserCard,
   type Deck,
   type InsertDeck,
+  type DeckCard,
+  type InsertDeckCard,
   type Game,
   type InsertGame,
-  type UserBoosterPack,
-  type InsertUserBoosterPack,
+  type GameMove,
+  type InsertGameMove,
   type Achievement,
-  type UserAchievement,
-  type InsertUserAchievement,
+  type BoosterPack,
+  type UserBoosterPack,
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, desc, and, sql } from "drizzle-orm";
+import { eq, desc, and, sql, inArray } from "drizzle-orm";
 
 export interface IStorage {
   // User operations (mandatory for Replit Auth)
   getUser(id: string): Promise<User | undefined>;
   upsertUser(user: UpsertUser): Promise<User>;
-  
+  getUserByUsername(username: string): Promise<User | undefined>;
+  updateUserStats(userId: string, stats: { gamesPlayed?: number; gamesWon?: number; experience?: number; level?: number; credits?: number }): Promise<void>;
+
   // Card operations
   getAllCards(): Promise<Card[]>;
   getCard(id: number): Promise<Card | undefined>;
-  
-  // User card collection operations
-  getUserCards(userId: string): Promise<UserCard[]>;
+  createCard(card: InsertCard): Promise<Card>;
+  getUserCards(userId: string): Promise<(UserCard & { card: Card })[]>;
   addCardToUser(userId: string, cardId: number, quantity?: number): Promise<UserCard>;
-  
+  removeCardFromUser(userId: string, cardId: number, quantity?: number): Promise<void>;
+
   // Deck operations
   getUserDecks(userId: string): Promise<Deck[]>;
-  createDeck(userId: string, deck: Omit<InsertDeck, "userId">): Promise<Deck>;
-  updateDeck(deckId: number, updates: Partial<Deck>): Promise<Deck>;
-  deleteDeck(deckId: number): Promise<void>;
-  
+  getDeck(id: number): Promise<(Deck & { deckCards: (DeckCard & { card: Card })[] }) | undefined>;
+  createDeck(deck: InsertDeck): Promise<Deck>;
+  updateDeck(id: number, updates: Partial<Deck>): Promise<void>;
+  deleteDeck(id: number): Promise<void>;
+  addCardToDeck(deckId: number, cardId: number, quantity?: number): Promise<DeckCard>;
+  removeCardFromDeck(deckId: number, cardId: number, quantity?: number): Promise<void>;
+
   // Game operations
   createGame(game: InsertGame): Promise<Game>;
-  updateGame(gameId: number, updates: Partial<Game>): Promise<Game>;
-  getUserGames(userId: string): Promise<Game[]>;
-  getActiveGame(userId: string): Promise<Game | undefined>;
-  
-  // Booster pack operations
-  getUserBoosterPacks(userId: string): Promise<UserBoosterPack[]>;
-  addBoosterPack(userId: string, packType?: string): Promise<UserBoosterPack>;
-  useBoosterPack(userId: string, packType?: string): Promise<Card[]>;
-  
+  getGame(id: string): Promise<Game | undefined>;
+  updateGame(id: string, updates: Partial<Game>): Promise<void>;
+  getActiveGamesForUser(userId: string): Promise<Game[]>;
+  getGameHistory(userId: string, limit?: number): Promise<Game[]>;
+  addGameMove(move: InsertGameMove): Promise<GameMove>;
+  getGameMoves(gameId: string): Promise<GameMove[]>;
+
   // Achievement operations
   getAllAchievements(): Promise<Achievement[]>;
-  getUserAchievements(userId: string): Promise<UserAchievement[]>;
-  unlockAchievement(userId: string, achievementId: number): Promise<UserAchievement>;
-  
-  // Leaderboard operations
-  getLeaderboard(limit?: number): Promise<User[]>;
-  updateUserStats(userId: string, stats: { gamesPlayed?: number; gamesWon?: number; experience?: number }): Promise<User>;
+  getUserAchievements(userId: string): Promise<Achievement[]>;
+  unlockAchievement(userId: string, achievementId: number): Promise<void>;
+
+  // Booster pack operations
+  getAllBoosterPacks(): Promise<BoosterPack[]>;
+  getUserBoosterPacks(userId: string): Promise<UserBoosterPack[]>;
+  purchaseBoosterPack(userId: string, packId: number, quantity?: number): Promise<void>;
+  openBoosterPack(userId: string, packId: number): Promise<Card[]>;
+
+  // Ranking operations
+  getTopPlayers(limit?: number): Promise<User[]>;
 }
 
 export class DatabaseStorage implements IStorage {
-  // User operations (mandatory for Replit Auth)
+  // User operations
   async getUser(id: string): Promise<User | undefined> {
     const [user] = await db.select().from(users).where(eq(users.id, id));
     return user;
@@ -87,9 +101,20 @@ export class DatabaseStorage implements IStorage {
     return user;
   }
 
+  async getUserByUsername(username: string): Promise<User | undefined> {
+    const [user] = await db.select().from(users).where(eq(users.username, username));
+    return user;
+  }
+
+  async updateUserStats(userId: string, stats: { gamesPlayed?: number; gamesWon?: number; experience?: number; level?: number; credits?: number }): Promise<void> {
+    await db.update(users)
+      .set({ ...stats, updatedAt: new Date() })
+      .where(eq(users.id, userId));
+  }
+
   // Card operations
   async getAllCards(): Promise<Card[]> {
-    return await db.select().from(cards);
+    return await db.select().from(cards).orderBy(cards.name);
   }
 
   async getCard(id: number): Promise<Card | undefined> {
@@ -97,57 +122,150 @@ export class DatabaseStorage implements IStorage {
     return card;
   }
 
-  // User card collection operations
-  async getUserCards(userId: string): Promise<UserCard[]> {
-    return await db.select().from(userCards).where(eq(userCards.userId, userId));
+  async createCard(card: InsertCard): Promise<Card> {
+    const [newCard] = await db.insert(cards).values(card).returning();
+    return newCard;
+  }
+
+  async getUserCards(userId: string): Promise<(UserCard & { card: Card })[]> {
+    return await db
+      .select()
+      .from(userCards)
+      .innerJoin(cards, eq(userCards.cardId, cards.id))
+      .where(eq(userCards.userId, userId))
+      .orderBy(cards.name);
   }
 
   async addCardToUser(userId: string, cardId: number, quantity: number = 1): Promise<UserCard> {
-    const [existingCard] = await db
+    // Check if user already has this card
+    const [existing] = await db
       .select()
       .from(userCards)
       .where(and(eq(userCards.userId, userId), eq(userCards.cardId, cardId)));
 
-    if (existingCard) {
+    if (existing) {
+      // Update quantity
       const [updated] = await db
         .update(userCards)
-        .set({ quantity: existingCard.quantity + quantity })
-        .where(eq(userCards.id, existingCard.id))
+        .set({ quantity: existing.quantity + quantity })
+        .where(and(eq(userCards.userId, userId), eq(userCards.cardId, cardId)))
         .returning();
       return updated;
     } else {
-      const [newCard] = await db
+      // Create new entry
+      const [newUserCard] = await db
         .insert(userCards)
         .values({ userId, cardId, quantity })
         .returning();
-      return newCard;
+      return newUserCard;
+    }
+  }
+
+  async removeCardFromUser(userId: string, cardId: number, quantity: number = 1): Promise<void> {
+    const [existing] = await db
+      .select()
+      .from(userCards)
+      .where(and(eq(userCards.userId, userId), eq(userCards.cardId, cardId)));
+
+    if (existing) {
+      if (existing.quantity <= quantity) {
+        // Remove completely
+        await db
+          .delete(userCards)
+          .where(and(eq(userCards.userId, userId), eq(userCards.cardId, cardId)));
+      } else {
+        // Reduce quantity
+        await db
+          .update(userCards)
+          .set({ quantity: existing.quantity - quantity })
+          .where(and(eq(userCards.userId, userId), eq(userCards.cardId, cardId)));
+      }
     }
   }
 
   // Deck operations
   async getUserDecks(userId: string): Promise<Deck[]> {
-    return await db.select().from(decks).where(eq(decks.userId, userId));
+    return await db
+      .select()
+      .from(decks)
+      .where(eq(decks.userId, userId))
+      .orderBy(desc(decks.createdAt));
   }
 
-  async createDeck(userId: string, deck: Omit<InsertDeck, "userId">): Promise<Deck> {
-    const [newDeck] = await db
-      .insert(decks)
-      .values({ ...deck, userId })
-      .returning();
+  async getDeck(id: number): Promise<(Deck & { deckCards: (DeckCard & { card: Card })[] }) | undefined> {
+    const [deck] = await db.select().from(decks).where(eq(decks.id, id));
+    if (!deck) return undefined;
+
+    const deckCardsWithCards = await db
+      .select()
+      .from(deckCards)
+      .innerJoin(cards, eq(deckCards.cardId, cards.id))
+      .where(eq(deckCards.deckId, id));
+
+    return {
+      ...deck,
+      deckCards: deckCardsWithCards.map(row => ({
+        ...row.deck_cards,
+        card: row.cards
+      }))
+    };
+  }
+
+  async createDeck(deck: InsertDeck): Promise<Deck> {
+    const [newDeck] = await db.insert(decks).values(deck).returning();
     return newDeck;
   }
 
-  async updateDeck(deckId: number, updates: Partial<Deck>): Promise<Deck> {
-    const [updated] = await db
-      .update(decks)
+  async updateDeck(id: number, updates: Partial<Deck>): Promise<void> {
+    await db.update(decks)
       .set({ ...updates, updatedAt: new Date() })
-      .where(eq(decks.id, deckId))
-      .returning();
-    return updated;
+      .where(eq(decks.id, id));
   }
 
-  async deleteDeck(deckId: number): Promise<void> {
-    await db.delete(decks).where(eq(decks.id, deckId));
+  async deleteDeck(id: number): Promise<void> {
+    await db.delete(decks).where(eq(decks.id, id));
+  }
+
+  async addCardToDeck(deckId: number, cardId: number, quantity: number = 1): Promise<DeckCard> {
+    const [existing] = await db
+      .select()
+      .from(deckCards)
+      .where(and(eq(deckCards.deckId, deckId), eq(deckCards.cardId, cardId)));
+
+    if (existing) {
+      const [updated] = await db
+        .update(deckCards)
+        .set({ quantity: existing.quantity + quantity })
+        .where(and(eq(deckCards.deckId, deckId), eq(deckCards.cardId, cardId)))
+        .returning();
+      return updated;
+    } else {
+      const [newDeckCard] = await db
+        .insert(deckCards)
+        .values({ deckId, cardId, quantity })
+        .returning();
+      return newDeckCard;
+    }
+  }
+
+  async removeCardFromDeck(deckId: number, cardId: number, quantity: number = 1): Promise<void> {
+    const [existing] = await db
+      .select()
+      .from(deckCards)
+      .where(and(eq(deckCards.deckId, deckId), eq(deckCards.cardId, cardId)));
+
+    if (existing) {
+      if (existing.quantity <= quantity) {
+        await db
+          .delete(deckCards)
+          .where(and(eq(deckCards.deckId, deckId), eq(deckCards.cardId, cardId)));
+      } else {
+        await db
+          .update(deckCards)
+          .set({ quantity: existing.quantity - quantity })
+          .where(and(eq(deckCards.deckId, deckId), eq(deckCards.cardId, cardId)));
+      }
+    }
   }
 
   // Game operations
@@ -156,123 +274,181 @@ export class DatabaseStorage implements IStorage {
     return newGame;
   }
 
-  async updateGame(gameId: number, updates: Partial<Game>): Promise<Game> {
-    const [updated] = await db
-      .update(games)
-      .set(updates)
-      .where(eq(games.id, gameId))
-      .returning();
-    return updated;
+  async getGame(id: string): Promise<Game | undefined> {
+    const [game] = await db.select().from(games).where(eq(games.id, id));
+    return game;
   }
 
-  async getUserGames(userId: string): Promise<Game[]> {
+  async updateGame(id: string, updates: Partial<Game>): Promise<void> {
+    await db.update(games).set(updates).where(eq(games.id, id));
+  }
+
+  async getActiveGamesForUser(userId: string): Promise<Game[]> {
     return await db
       .select()
       .from(games)
       .where(
         and(
-          sql`(${games.player1Id} = ${userId} OR ${games.player2Id} = ${userId})`,
-          eq(games.isActive, false)
+          eq(games.status, "active"),
+          sql`(${games.player1Id} = ${userId} OR ${games.player2Id} = ${userId})`
         )
-      )
-      .orderBy(desc(games.endedAt));
+      );
   }
 
-  async getActiveGame(userId: string): Promise<Game | undefined> {
-    const [game] = await db
+  async getGameHistory(userId: string, limit: number = 20): Promise<Game[]> {
+    return await db
       .select()
       .from(games)
       .where(
         and(
-          sql`(${games.player1Id} = ${userId} OR ${games.player2Id} = ${userId})`,
-          eq(games.isActive, true)
+          eq(games.status, "finished"),
+          sql`(${games.player1Id} = ${userId} OR ${games.player2Id} = ${userId})`
         )
-      );
-    return game;
+      )
+      .orderBy(desc(games.finishedAt))
+      .limit(limit);
   }
 
-  // Booster pack operations
-  async getUserBoosterPacks(userId: string): Promise<UserBoosterPack[]> {
-    return await db.select().from(userBoosterPacks).where(eq(userBoosterPacks.userId, userId));
+  async addGameMove(move: InsertGameMove): Promise<GameMove> {
+    const [newMove] = await db.insert(gameMoves).values(move).returning();
+    return newMove;
   }
 
-  async addBoosterPack(userId: string, packType: string = "Standard"): Promise<UserBoosterPack> {
-    const [pack] = await db
-      .insert(userBoosterPacks)
-      .values({ userId, packType })
-      .returning();
-    return pack;
-  }
-
-  async useBoosterPack(userId: string, packType: string = "Standard"): Promise<Card[]> {
-    // Find and remove a booster pack
-    const [pack] = await db
+  async getGameMoves(gameId: string): Promise<GameMove[]> {
+    return await db
       .select()
-      .from(userBoosterPacks)
-      .where(and(eq(userBoosterPacks.userId, userId), eq(userBoosterPacks.packType, packType)));
-
-    if (!pack) {
-      throw new Error("No booster pack available");
-    }
-
-    if (pack.quantity > 1) {
-      await db
-        .update(userBoosterPacks)
-        .set({ quantity: pack.quantity - 1 })
-        .where(eq(userBoosterPacks.id, pack.id));
-    } else {
-      await db.delete(userBoosterPacks).where(eq(userBoosterPacks.id, pack.id));
-    }
-
-    // Generate 5 random cards
-    const allCards = await this.getAllCards();
-    const randomCards: Card[] = [];
-    
-    for (let i = 0; i < 5; i++) {
-      const randomIndex = Math.floor(Math.random() * allCards.length);
-      const selectedCard = allCards[randomIndex];
-      randomCards.push(selectedCard);
-      
-      // Add card to user's collection
-      await this.addCardToUser(userId, selectedCard.id);
-    }
-
-    return randomCards;
+      .from(gameMoves)
+      .where(eq(gameMoves.gameId, gameId))
+      .orderBy(gameMoves.createdAt);
   }
 
   // Achievement operations
   async getAllAchievements(): Promise<Achievement[]> {
-    return await db.select().from(achievements);
+    return await db.select().from(achievements).orderBy(achievements.name);
   }
 
-  async getUserAchievements(userId: string): Promise<UserAchievement[]> {
-    return await db.select().from(userAchievements).where(eq(userAchievements.userId, userId));
+  async getUserAchievements(userId: string): Promise<Achievement[]> {
+    const userAchievs = await db
+      .select()
+      .from(userAchievements)
+      .innerJoin(achievements, eq(userAchievements.achievementId, achievements.id))
+      .where(eq(userAchievements.userId, userId));
+
+    return userAchievs.map(row => row.achievements);
   }
 
-  async unlockAchievement(userId: string, achievementId: number): Promise<UserAchievement> {
-    const [achievement] = await db
-      .insert(userAchievements)
-      .values({ userId, achievementId })
-      .returning();
-    return achievement;
+  async unlockAchievement(userId: string, achievementId: number): Promise<void> {
+    // Check if already unlocked
+    const [existing] = await db
+      .select()
+      .from(userAchievements)
+      .where(and(eq(userAchievements.userId, userId), eq(userAchievements.achievementId, achievementId)));
+
+    if (!existing) {
+      await db.insert(userAchievements).values({ userId, achievementId });
+    }
   }
 
-  // Leaderboard operations
-  async getLeaderboard(limit: number = 100): Promise<User[]> {
+  // Booster pack operations
+  async getAllBoosterPacks(): Promise<BoosterPack[]> {
+    return await db.select().from(boosterPacks).orderBy(boosterPacks.price);
+  }
+
+  async getUserBoosterPacks(userId: string): Promise<UserBoosterPack[]> {
+    return await db
+      .select()
+      .from(userBoosterPacks)
+      .where(eq(userBoosterPacks.userId, userId))
+      .orderBy(desc(userBoosterPacks.purchasedAt));
+  }
+
+  async purchaseBoosterPack(userId: string, packId: number, quantity: number = 1): Promise<void> {
+    const [existing] = await db
+      .select()
+      .from(userBoosterPacks)
+      .where(and(eq(userBoosterPacks.userId, userId), eq(userBoosterPacks.boosterPackId, packId)));
+
+    if (existing) {
+      await db
+        .update(userBoosterPacks)
+        .set({ quantity: existing.quantity + quantity })
+        .where(and(eq(userBoosterPacks.userId, userId), eq(userBoosterPacks.boosterPackId, packId)));
+    } else {
+      await db
+        .insert(userBoosterPacks)
+        .values({ userId, boosterPackId: packId, quantity });
+    }
+  }
+
+  async openBoosterPack(userId: string, packId: number): Promise<Card[]> {
+    // Remove one pack from user's inventory
+    const [userPack] = await db
+      .select()
+      .from(userBoosterPacks)
+      .where(and(eq(userBoosterPacks.userId, userId), eq(userBoosterPacks.boosterPackId, packId)));
+
+    if (!userPack || userPack.quantity <= 0) {
+      throw new Error("No booster packs available");
+    }
+
+    if (userPack.quantity === 1) {
+      await db
+        .delete(userBoosterPacks)
+        .where(and(eq(userBoosterPacks.userId, userId), eq(userBoosterPacks.boosterPackId, packId)));
+    } else {
+      await db
+        .update(userBoosterPacks)
+        .set({ quantity: userPack.quantity - 1 })
+        .where(and(eq(userBoosterPacks.userId, userId), eq(userBoosterPacks.boosterPackId, packId)));
+    }
+
+    // Get pack details
+    const [pack] = await db.select().from(boosterPacks).where(eq(boosterPacks.id, packId));
+    if (!pack) throw new Error("Booster pack not found");
+
+    // Generate random cards based on rarity
+    const allCards = await this.getAllCards();
+    const revealedCards: Card[] = [];
+
+    for (let i = 0; i < pack.cardCount; i++) {
+      // Weighted random selection based on rarity
+      const random = Math.random();
+      let selectedCard: Card;
+
+      if (random < 0.6) {
+        // 60% chance for common
+        const commonCards = allCards.filter(c => c.rarity === "Common");
+        selectedCard = commonCards[Math.floor(Math.random() * commonCards.length)];
+      } else if (random < 0.85) {
+        // 25% chance for uncommon
+        const uncommonCards = allCards.filter(c => c.rarity === "Uncommon");
+        selectedCard = uncommonCards[Math.floor(Math.random() * uncommonCards.length)] || allCards[0];
+      } else if (random < 0.96) {
+        // 11% chance for rare
+        const rareCards = allCards.filter(c => c.rarity === "Rare");
+        selectedCard = rareCards[Math.floor(Math.random() * rareCards.length)] || allCards[0];
+      } else {
+        // 4% chance for legendary
+        const legendaryCards = allCards.filter(c => c.rarity === "Legendary");
+        selectedCard = legendaryCards[Math.floor(Math.random() * legendaryCards.length)] || allCards[0];
+      }
+
+      revealedCards.push(selectedCard);
+      
+      // Add card to user's collection
+      await this.addCardToUser(userId, selectedCard.id, 1);
+    }
+
+    return revealedCards;
+  }
+
+  // Ranking operations
+  async getTopPlayers(limit: number = 50): Promise<User[]> {
     return await db
       .select()
       .from(users)
-      .orderBy(desc(users.experience), desc(users.gamesWon))
+      .orderBy(desc(users.gamesWon), desc(users.level), desc(users.experience))
       .limit(limit);
-  }
-
-  async updateUserStats(userId: string, stats: { gamesPlayed?: number; gamesWon?: number; experience?: number }): Promise<User> {
-    const [updated] = await db
-      .update(users)
-      .set({ ...stats, updatedAt: new Date() })
-      .where(eq(users.id, userId))
-      .returning();
-    return updated;
   }
 }
 

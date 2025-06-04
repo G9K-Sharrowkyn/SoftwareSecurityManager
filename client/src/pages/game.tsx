@@ -1,36 +1,21 @@
-import { useEffect, useState } from "react";
-import { useLocation } from "wouter";
+import { useEffect } from "react";
+import { useParams, useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/useAuth";
-import GameInterface from "@/components/game/GameInterface";
-import StarBackground from "@/components/ui/star-background";
 import { useToast } from "@/hooks/use-toast";
 import { isUnauthorizedError } from "@/lib/authUtils";
+import GameInterface from "@/components/game/GameInterface";
 
 export default function Game() {
-  const { user, isLoading } = useAuth();
-  const [location, setLocation] = useLocation();
+  const params = useParams();
+  const [, setLocation] = useLocation();
+  const { isAuthenticated, isLoading } = useAuth();
   const { toast } = useToast();
-  const [gameId, setGameId] = useState<number | null>(null);
+  const gameId = params.id;
 
-  // Get game ID from URL params
+  // Redirect if not authenticated
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const id = params.get('id');
-    if (id) {
-      setGameId(parseInt(id));
-    }
-  }, []);
-
-  const { data: game, isLoading: gameLoading, error } = useQuery({
-    queryKey: [`/api/games/${gameId}`],
-    enabled: !!gameId,
-    retry: false,
-  });
-
-  // Redirect to login if not authenticated
-  useEffect(() => {
-    if (!isLoading && !user) {
+    if (!isLoading && !isAuthenticated) {
       toast({
         title: "Unauthorized",
         description: "You are logged out. Logging in again...",
@@ -41,49 +26,67 @@ export default function Game() {
       }, 500);
       return;
     }
-  }, [user, isLoading, toast]);
+  }, [isAuthenticated, isLoading, toast]);
 
-  // Handle errors
+  // Fetch game data if gameId exists
+  const { data: game, isLoading: gameLoading, error } = useQuery({
+    queryKey: ["/api/games", gameId],
+    enabled: isAuthenticated && !!gameId,
+    retry: false,
+  });
+
   useEffect(() => {
-    if (error) {
-      if (isUnauthorizedError(error)) {
-        toast({
-          title: "Unauthorized",
-          description: "You are logged out. Logging in again...",
-          variant: "destructive",
-        });
-        setTimeout(() => {
-          window.location.href = "/api/login";
-        }, 500);
-        return;
-      }
+    if (error && isUnauthorizedError(error)) {
       toast({
-        title: "Error",
-        description: "Failed to load game. Returning to home.",
+        title: "Unauthorized",
+        description: "You are logged out. Logging in again...",
         variant: "destructive",
       });
       setTimeout(() => {
-        setLocation('/');
-      }, 2000);
+        window.location.href = "/api/login";
+      }, 500);
+      return;
     }
-  }, [error, toast, setLocation]);
+  }, [error, toast]);
 
-  if (isLoading || gameLoading || !user || !gameId) {
+  const handleExitGame = () => {
+    setLocation("/");
+  };
+
+  if (isLoading || gameLoading) {
     return (
-      <div className="min-h-screen bg-cosmic-900 text-cosmic-silver relative overflow-hidden flex items-center justify-center">
-        <StarBackground />
-        <div className="relative z-10 text-center">
-          <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-cosmic-gold mx-auto mb-4"></div>
-          <p className="text-xl">Loading game...</p>
+      <div className="min-h-screen flex items-center justify-center relative z-10">
+        <div className="text-cosmic-gold text-xl">Loading game...</div>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return null;
+  }
+
+  if (gameId && !game) {
+    return (
+      <div className="min-h-screen flex items-center justify-center relative z-10">
+        <div className="text-center space-y-4">
+          <div className="text-red-400 text-xl">Game not found</div>
+          <button 
+            onClick={handleExitGame}
+            className="bg-cosmic-gold text-cosmic-900 px-6 py-2 rounded-lg font-semibold hover:bg-cosmic-gold/80 transition-colors"
+          >
+            Return to Home
+          </button>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-cosmic-900 text-cosmic-silver relative overflow-hidden">
-      <StarBackground />
-      <GameInterface gameId={gameId} />
+    <div className="min-h-screen relative z-10">
+      <GameInterface 
+        game={game}
+        onExitGame={handleExitGame}
+      />
     </div>
   );
 }

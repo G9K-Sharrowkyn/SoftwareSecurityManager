@@ -4,30 +4,45 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useAuth } from "@/hooks/useAuth";
-import Landing from "@/pages/landing";
-import Home from "@/pages/home";
-import Game from "@/pages/game";
-import Collection from "@/pages/collection";
-import DeckBuilder from "@/pages/deck-builder";
+import Landing from "@/pages/Landing";
+import GameLobby from "@/pages/GameLobby";
+import GameRoom from "@/pages/GameRoom";
+import Collection from "@/pages/Collection";
+import DeckBuilder from "@/pages/DeckBuilder";
 import NotFound from "@/pages/not-found";
+import Navigation from "@/components/layout/Navigation";
+import StarBackground from "@/components/layout/StarBackground";
 
 function Router() {
   const { isAuthenticated, isLoading } = useAuth();
 
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-cosmic-900 flex items-center justify-center">
+        <div className="text-cosmic-gold text-xl">Loading...</div>
+      </div>
+    );
+  }
+
   return (
-    <Switch>
-      {isLoading || !isAuthenticated ? (
-        <Route path="/" component={Landing} />
-      ) : (
-        <>
-          <Route path="/" component={Home} />
-          <Route path="/game" component={Game} />
-          <Route path="/collection" component={Collection} />
-          <Route path="/deck-builder" component={DeckBuilder} />
-        </>
-      )}
-      <Route component={NotFound} />
-    </Switch>
+    <div className="min-h-screen bg-cosmic-900 text-cosmic-silver relative">
+      <StarBackground />
+      {isAuthenticated && <Navigation />}
+      
+      <Switch>
+        {!isAuthenticated ? (
+          <Route path="/" component={Landing} />
+        ) : (
+          <>
+            <Route path="/" component={GameLobby} />
+            <Route path="/game/:gameId" component={GameRoom} />
+            <Route path="/collection" component={Collection} />
+            <Route path="/deck-builder" component={DeckBuilder} />
+          </>
+        )}
+        <Route component={NotFound} />
+      </Switch>
+    </div>
   );
 }
 
