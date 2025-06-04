@@ -1,289 +1,237 @@
-import { useAuth } from "@/hooks/useAuth";
-import { useToast } from "@/hooks/use-toast";
+import { useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Link } from "wouter";
-import { 
-  ArrowLeft, 
-  Trophy, 
-  Crown, 
-  Medal,
-  TrendingUp,
-  Users,
-  Zap
-} from "lucide-react";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { useAuth } from "@/hooks/useAuth";
+import { useToast } from "@/hooks/use-toast";
+import StarBackground from "@/components/ui/star-background";
+import Navigation from "@/components/ui/navigation";
 
 export default function Rankings() {
-  const { user, isAuthenticated } = useAuth();
+  const { user, isLoading } = useAuth();
   const { toast } = useToast();
 
-  // Redirect if not authenticated
-  if (!isAuthenticated) {
-    toast({
-      title: "Unauthorized",
-      description: "You are logged out. Logging in again...",
-      variant: "destructive",
-    });
-    setTimeout(() => {
-      window.location.href = "/api/login";
-    }, 500);
+  // Redirect to login if not authenticated
+  useEffect(() => {
+    if (!isLoading && !user) {
+      toast({
+        title: "Unauthorized",
+        description: "You are logged out. Logging in again...",
+        variant: "destructive",
+      });
+      setTimeout(() => {
+        window.location.href = "/api/login";
+      }, 500);
+      return;
+    }
+  }, [user, isLoading, toast]);
+
+  const { data: leaderboard, isLoading: leaderboardLoading } = useQuery({
+    queryKey: ["/api/leaderboard"],
+    retry: false,
+  });
+
+  if (isLoading || leaderboardLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-cosmic-gold">Loading...</div>
+      </div>
+    );
+  }
+
+  if (!user) {
     return null;
   }
 
-  // Fetch rankings
-  const { data: rankings, isLoading } = useQuery({
-    queryKey: ["/api/rankings"],
-  });
-
-  // Find current user's rank
-  const userRank = rankings?.findIndex((player: any) => player.id === user?.id) + 1 || null;
+  const rankings = leaderboard || [];
+  const userRank = rankings.findIndex((player: any) => player.id === user.id) + 1;
 
   const getRankIcon = (rank: number) => {
     switch (rank) {
-      case 1:
-        return <Crown className="w-6 h-6 text-yellow-400" />;
-      case 2:
-        return <Medal className="w-6 h-6 text-gray-400" />;
-      case 3:
-        return <Medal className="w-6 h-6 text-amber-600" />;
-      default:
-        return <div className="w-6 h-6 flex items-center justify-center text-muted-foreground font-bold">#{rank}</div>;
+      case 1: return { icon: "fas fa-crown", color: "text-yellow-400" };
+      case 2: return { icon: "fas fa-medal", color: "text-gray-300" };
+      case 3: return { icon: "fas fa-award", color: "text-yellow-600" };
+      default: return { icon: "fas fa-hashtag", color: "text-cosmic-gold" };
     }
   };
 
   const getRankBadge = (rank: number) => {
-    if (rank === 1) return <Badge className="bg-yellow-500 text-black">Champion</Badge>;
-    if (rank <= 3) return <Badge className="bg-primary">Elite</Badge>;
-    if (rank <= 10) return <Badge variant="secondary">Top 10</Badge>;
-    if (rank <= 50) return <Badge variant="outline">Top 50</Badge>;
-    return null;
+    if (rank <= 3) return "default";
+    if (rank <= 10) return "secondary";
+    return "outline";
   };
 
   return (
-    <div className="min-h-screen relative z-10">
-      {/* Header */}
-      <header className="bg-card/80 backdrop-blur-sm border-b border-border sticky top-0 z-50">
-        <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-4">
-              <Link href="/">
-                <Button variant="ghost" size="sm">
-                  <ArrowLeft className="w-4 h-4 mr-2" />
-                  Back to Dashboard
-                </Button>
-              </Link>
-              <h1 className="text-2xl font-bold text-primary flex items-center">
-                <Trophy className="w-8 h-8 mr-2" />
-                Galactic Rankings
-              </h1>
-            </div>
-          </div>
+    <div className="min-h-screen relative">
+      <StarBackground />
+      <Navigation />
+      
+      <main className="relative z-10 container mx-auto px-4 py-8">
+        <div className="flex items-center justify-between mb-8">
+          <h1 className="text-4xl font-bold text-cosmic-gold animate-glow">
+            <i className="fas fa-trophy mr-3"></i>
+            Galactic Rankings
+          </h1>
+          {userRank > 0 && (
+            <Badge variant="secondary" className="text-lg px-4 py-2">
+              Your Rank: #{userRank}
+            </Badge>
+          )}
         </div>
-      </header>
 
-      <div className="container mx-auto px-4 py-8">
-        {/* User's Current Rank */}
-        {userRank && (
-          <Card className="mb-8 bg-gradient-to-r from-primary/20 to-accent/20 border-primary/50">
-            <CardContent className="p-6">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-4">
-                  <div className="flex items-center space-x-2">
-                    {getRankIcon(userRank)}
-                    <span className="text-2xl font-bold text-primary">Rank #{userRank}</span>
+        {/* Top 3 Podium */}
+        {rankings.length >= 3 && (
+          <Card className="bg-cosmic-blue/30 border-cosmic-gold/30 mb-8">
+            <CardHeader>
+              <CardTitle className="text-cosmic-gold text-center">
+                Elite Commanders
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="flex justify-center items-end space-x-8">
+                {/* 2nd Place */}
+                <div className="text-center">
+                  <div className="relative">
+                    <Avatar className="w-20 h-20 mx-auto mb-4 border-4 border-gray-300">
+                      <AvatarImage src={rankings[1]?.profileImageUrl} />
+                      <AvatarFallback className="bg-gray-300 text-space-black text-xl">
+                        {rankings[1]?.username?.charAt(0) || "2"}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div className="absolute -top-2 -right-2 w-8 h-8 bg-gray-300 rounded-full flex items-center justify-center">
+                      <i className="fas fa-medal text-gray-700"></i>
+                    </div>
                   </div>
-                  {getRankBadge(userRank)}
+                  <h3 className="font-bold text-lg">{rankings[1]?.username}</h3>
+                  <p className="text-sm text-foreground/70">{rankings[1]?.wins} wins</p>
+                  <p className="text-sm text-green-400">{rankings[1]?.winRate}% win rate</p>
                 </div>
-                <div className="text-right">
-                  <div className="text-sm text-muted-foreground">Your Stats</div>
-                  <div className="flex items-center space-x-4 text-sm">
-                    <span className="text-green-400">{user?.totalWins || 0} Wins</span>
-                    <span className="text-primary">{user?.experience || 0} XP</span>
+
+                {/* 1st Place */}
+                <div className="text-center">
+                  <div className="relative">
+                    <Avatar className="w-24 h-24 mx-auto mb-4 border-4 border-yellow-400">
+                      <AvatarImage src={rankings[0]?.profileImageUrl} />
+                      <AvatarFallback className="bg-yellow-400 text-space-black text-2xl">
+                        {rankings[0]?.username?.charAt(0) || "1"}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div className="absolute -top-2 -right-2 w-10 h-10 bg-yellow-400 rounded-full flex items-center justify-center">
+                      <i className="fas fa-crown text-yellow-800"></i>
+                    </div>
                   </div>
+                  <h3 className="font-bold text-xl text-yellow-400">{rankings[0]?.username}</h3>
+                  <p className="text-sm text-foreground/70">{rankings[0]?.wins} wins</p>
+                  <p className="text-sm text-green-400">{rankings[0]?.winRate}% win rate</p>
+                  <Badge className="mt-2 bg-yellow-400 text-space-black">Champion</Badge>
+                </div>
+
+                {/* 3rd Place */}
+                <div className="text-center">
+                  <div className="relative">
+                    <Avatar className="w-20 h-20 mx-auto mb-4 border-4 border-yellow-600">
+                      <AvatarImage src={rankings[2]?.profileImageUrl} />
+                      <AvatarFallback className="bg-yellow-600 text-space-black text-xl">
+                        {rankings[2]?.username?.charAt(0) || "3"}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div className="absolute -top-2 -right-2 w-8 h-8 bg-yellow-600 rounded-full flex items-center justify-center">
+                      <i className="fas fa-award text-yellow-800"></i>
+                    </div>
+                  </div>
+                  <h3 className="font-bold text-lg">{rankings[2]?.username}</h3>
+                  <p className="text-sm text-foreground/70">{rankings[2]?.wins} wins</p>
+                  <p className="text-sm text-green-400">{rankings[2]?.winRate}% win rate</p>
                 </div>
               </div>
             </CardContent>
           </Card>
         )}
 
-        {/* Rankings Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* Top 3 Podium */}
-          <div className="lg:col-span-3">
-            <h2 className="text-xl font-bold text-primary mb-6 flex items-center">
-              <Crown className="w-5 h-5 mr-2" />
-              Hall of Champions
-            </h2>
-            
-            {isLoading ? (
+        {/* Full Leaderboard */}
+        <Card className="bg-cosmic-blue/30 border-cosmic-gold/30">
+          <CardHeader>
+            <CardTitle className="text-cosmic-gold">
+              <i className="fas fa-list mr-2"></i>
+              Full Leaderboard
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {rankings.length === 0 ? (
               <div className="text-center py-12">
-                <div className="loading-spinner w-8 h-8 border-4 border-primary/30 border-t-primary rounded-full mx-auto mb-4"></div>
-                <p className="text-muted-foreground">Loading rankings...</p>
-              </div>
-            ) : rankings && rankings.length >= 3 ? (
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-                {/* 2nd Place */}
-                <Card className="bg-gradient-to-br from-gray-600/20 to-gray-700/20 border-gray-400/50 order-2 md:order-1">
-                  <CardContent className="p-6 text-center">
-                    <div className="flex justify-center mb-4">
-                      <Medal className="w-12 h-12 text-gray-400" />
-                    </div>
-                    <Avatar className="w-16 h-16 mx-auto mb-4 border-2 border-gray-400">
-                      <AvatarFallback className="bg-gray-600 text-white text-lg">
-                        {rankings[1].firstName?.[0] || rankings[1].email?.[0] || "2"}
-                      </AvatarFallback>
-                    </Avatar>
-                    <h3 className="font-bold text-lg">{rankings[1].firstName || "Commander"}</h3>
-                    <p className="text-sm text-muted-foreground mb-2">Level {rankings[1].level}</p>
-                    <div className="space-y-1 text-sm">
-                      <div className="text-green-400">{rankings[1].totalWins} Wins</div>
-                      <div className="text-primary">{rankings[1].experience} XP</div>
-                    </div>
-                  </CardContent>
-                </Card>
-
-                {/* 1st Place */}
-                <Card className="bg-gradient-to-br from-yellow-600/20 to-yellow-700/20 border-yellow-400/50 transform scale-105 order-1 md:order-2">
-                  <CardContent className="p-6 text-center">
-                    <div className="flex justify-center mb-4">
-                      <Crown className="w-16 h-16 text-yellow-400" />
-                    </div>
-                    <Avatar className="w-20 h-20 mx-auto mb-4 border-4 border-yellow-400">
-                      <AvatarFallback className="bg-yellow-600 text-black text-xl">
-                        {rankings[0].firstName?.[0] || rankings[0].email?.[0] || "1"}
-                      </AvatarFallback>
-                    </Avatar>
-                    <h3 className="font-bold text-xl text-yellow-400">{rankings[0].firstName || "Champion"}</h3>
-                    <p className="text-sm text-muted-foreground mb-2">Level {rankings[0].level}</p>
-                    <Badge className="bg-yellow-500 text-black mb-3">Galactic Champion</Badge>
-                    <div className="space-y-1 text-sm">
-                      <div className="text-green-400">{rankings[0].totalWins} Wins</div>
-                      <div className="text-yellow-400">{rankings[0].experience} XP</div>
-                    </div>
-                  </CardContent>
-                </Card>
-
-                {/* 3rd Place */}
-                <Card className="bg-gradient-to-br from-amber-600/20 to-amber-700/20 border-amber-600/50 order-3">
-                  <CardContent className="p-6 text-center">
-                    <div className="flex justify-center mb-4">
-                      <Medal className="w-12 h-12 text-amber-600" />
-                    </div>
-                    <Avatar className="w-16 h-16 mx-auto mb-4 border-2 border-amber-600">
-                      <AvatarFallback className="bg-amber-700 text-white text-lg">
-                        {rankings[2].firstName?.[0] || rankings[2].email?.[0] || "3"}
-                      </AvatarFallback>
-                    </Avatar>
-                    <h3 className="font-bold text-lg">{rankings[2].firstName || "Commander"}</h3>
-                    <p className="text-sm text-muted-foreground mb-2">Level {rankings[2].level}</p>
-                    <div className="space-y-1 text-sm">
-                      <div className="text-green-400">{rankings[2].totalWins} Wins</div>
-                      <div className="text-primary">{rankings[2].experience} XP</div>
-                    </div>
-                  </CardContent>
-                </Card>
+                <i className="fas fa-trophy text-6xl text-cosmic-gold/30 mb-4"></i>
+                <h3 className="text-xl font-semibold text-cosmic-gold mb-2">No Rankings Yet</h3>
+                <p className="text-foreground/70">
+                  Be the first to compete and claim your place in the galaxy!
+                </p>
               </div>
             ) : (
-              <div className="text-center py-12">
-                <Users className="w-16 h-16 text-muted-foreground mx-auto mb-4" />
-                <h3 className="text-lg font-semibold mb-2">No rankings available</h3>
-                <p className="text-muted-foreground">Be the first to start climbing the leaderboards!</p>
-              </div>
-            )}
-          </div>
-
-          {/* Full Rankings List */}
-          <div className="lg:col-span-3">
-            <h2 className="text-xl font-bold text-primary mb-6 flex items-center">
-              <TrendingUp className="w-5 h-5 mr-2" />
-              Full Leaderboard
-            </h2>
-            
-            <Card>
-              <CardContent className="p-0">
-                {isLoading ? (
-                  <div className="text-center py-12">
-                    <div className="loading-spinner w-8 h-8 border-4 border-primary/30 border-t-primary rounded-full mx-auto mb-4"></div>
-                    <p className="text-muted-foreground">Loading full rankings...</p>
-                  </div>
-                ) : rankings && rankings.length > 0 ? (
-                  <div className="divide-y divide-border">
-                    {rankings.map((player: any, index: number) => {
-                      const rank = index + 1;
-                      const isCurrentUser = player.id === user?.id;
-                      const winRate = player.totalWins + player.totalLosses > 0 
-                        ? Math.round((player.totalWins / (player.totalWins + player.totalLosses)) * 100)
-                        : 0;
-
-                      return (
-                        <div
-                          key={player.id}
-                          className={`p-4 flex items-center justify-between hover:bg-muted/50 transition-colors ${
-                            isCurrentUser ? 'bg-primary/10 border-l-4 border-l-primary' : ''
-                          }`}
-                        >
-                          <div className="flex items-center space-x-4">
-                            <div className="flex items-center justify-center w-10">
-                              {getRankIcon(rank)}
-                            </div>
-                            
-                            <Avatar className="w-10 h-10 border border-border">
-                              <AvatarFallback>
-                                {player.firstName?.[0] || player.email?.[0] || rank}
-                              </AvatarFallback>
-                            </Avatar>
-                            
-                            <div>
-                              <div className="flex items-center space-x-2">
-                                <span className={`font-medium ${isCurrentUser ? 'text-primary' : ''}`}>
-                                  {player.firstName || `Commander ${player.id.slice(-4)}`}
-                                </span>
-                                {isCurrentUser && <Badge variant="outline" className="text-xs">You</Badge>}
-                                {getRankBadge(rank)}
-                              </div>
-                              <div className="text-sm text-muted-foreground">
-                                Level {player.level} • {player.currentRank || 'Recruit'}
-                              </div>
-                            </div>
-                          </div>
+              <div className="space-y-2">
+                {rankings.map((player: any, index: number) => {
+                  const rank = index + 1;
+                  const rankInfo = getRankIcon(rank);
+                  const isCurrentUser = player.id === user.id;
+                  
+                  return (
+                    <div 
+                      key={player.id} 
+                      className={`flex items-center justify-between p-4 rounded-lg transition-all duration-200 ${
+                        isCurrentUser 
+                          ? "bg-cosmic-gold/20 border border-cosmic-gold/50" 
+                          : "bg-space-black/30 hover:bg-space-black/50"
+                      }`}
+                    >
+                      <div className="flex items-center space-x-4">
+                        <div className="flex items-center space-x-3">
+                          <Badge variant={getRankBadge(rank)} className="w-12 h-8 flex items-center justify-center">
+                            <i className={`${rankInfo.icon} ${rankInfo.color} mr-1`}></i>
+                            {rank}
+                          </Badge>
                           
-                          <div className="text-right space-y-1">
-                            <div className="flex items-center space-x-4 text-sm">
-                              <span className="text-green-400">{player.totalWins}W</span>
-                              <span className="text-red-400">{player.totalLosses}L</span>
-                              <span className="text-primary">{winRate}%</span>
-                            </div>
-                            <div className="text-xs text-muted-foreground">
-                              {player.experience} XP
-                            </div>
+                          <Avatar className="w-12 h-12">
+                            <AvatarImage src={player.profileImageUrl} />
+                            <AvatarFallback className="bg-cosmic-blue text-white">
+                              {player.username?.charAt(0) || "?"}
+                            </AvatarFallback>
+                          </Avatar>
+                        </div>
+                        
+                        <div>
+                          <div className="flex items-center space-x-2">
+                            <h3 className={`font-semibold ${isCurrentUser ? "text-cosmic-gold" : ""}`}>
+                              {player.username}
+                              {isCurrentUser && (
+                                <Badge variant="outline" className="ml-2 text-xs">You</Badge>
+                              )}
+                            </h3>
+                          </div>
+                          <div className="flex items-center space-x-4 text-sm text-foreground/70">
+                            <span>Level {player.level}</span>
+                            <span>•</span>
+                            <span>{player.wins} wins</span>
+                            <span>•</span>
+                            <span>{player.losses} losses</span>
                           </div>
                         </div>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <div className="text-center py-12">
-                    <Users className="w-16 h-16 text-muted-foreground mx-auto mb-4" />
-                    <h3 className="text-lg font-semibold mb-2">No players ranked yet</h3>
-                    <p className="text-muted-foreground mb-6">
-                      Start playing to appear on the leaderboards!
-                    </p>
-                    <Link href="/">
-                      <Button>
-                        <Zap className="w-4 h-4 mr-2" />
-                        Start Playing
-                      </Button>
-                    </Link>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </div>
-        </div>
-      </div>
+                      </div>
+                      
+                      <div className="text-right">
+                        <div className="text-lg font-bold text-green-400">
+                          {player.winRate}%
+                        </div>
+                        <div className="text-sm text-foreground/70">
+                          Win Rate
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </main>
     </div>
   );
 }

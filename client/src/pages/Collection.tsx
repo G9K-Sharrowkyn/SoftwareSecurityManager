@@ -1,314 +1,479 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/useAuth";
-import NavigationHeader from "@/components/NavigationHeader";
-import BoosterAnimation from "@/components/BoosterAnimation";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Gift, Search, Filter, Layers, Sparkles, ArrowLeft } from "lucide-react";
-import { useLocation } from "wouter";
-import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { isUnauthorizedError } from "@/lib/authUtils";
+import Navigation from "@/components/ui/navigation";
+import StarBackground from "@/components/game/StarBackground";
+import BoosterAnimation from "@/components/game/BoosterAnimation";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { apiRequest } from "@/lib/queryClient";
+
+interface Card {
+  id: number;
+  name: string;
+  type: string[];
+  attack: number;
+  defense: number;
+  commandCost: number;
+  specialAbility: string;
+  rarity: string;
+  imageUrl: string;
+}
+
+interface UserCard {
+  id: number;
+  quantity: number;
+  card: Card;
+}
+
+interface BoosterPack {
+  id: number;
+  packType: string;
+  isOpened: boolean;
+}
 
 export default function Collection() {
-  const { user } = useAuth();
-  const [, setLocation] = useLocation();
+  const { user, isAuthenticated, isLoading } = useAuth();
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [searchTerm, setSearchTerm] = useState("");
-  const [filterType, setFilterType] = useState("all");
-  const [filterRarity, setFilterRarity] = useState("all");
-  const [showParticles, setShowParticles] = useState(false);
-  const [revealedCards, setRevealedCards] = useState<any[]>([]);
+  const [selectedRarity, setSelectedRarity] = useState("All");
+  const [selectedType, setSelectedType] = useState("All");
+  const [selectedCard, setSelectedCard] = useState<Card | null>(null);
+  const [showBoosterModal, setShowBoosterModal] = useState(false);
+  const [revealedCards, setRevealedCards] = useState<Card[]>([]);
+  const [particlesVisible, setParticlesVisible] = useState(false);
 
-  const { data: collection } = useQuery({
+  // Fetch user collection
+  const { data: userCards = [], isLoading: collectionLoading } = useQuery({
     queryKey: ["/api/collection"],
-    enabled: !!user,
+    enabled: isAuthenticated,
+    retry: false,
   });
 
-  const { data: cards } = useQuery({
-    queryKey: ["/api/cards"],
+  // Fetch booster packs
+  const { data: boosterPacks = [], isLoading: packsLoading } = useQuery({
+    queryKey: ["/api/booster-packs"],
+    enabled: isAuthenticated,
+    retry: false,
   });
 
-  const { data: boosterPacks } = useQuery({
-    queryKey: ["/api/boosters"],
-    enabled: !!user,
-  });
-
-  const openPackMutation = useMutation({
-    mutationFn: async (packId: number) => {
-      const response = await apiRequest("POST", `/api/boosters/${packId}/open`);
-      return await response.json();
+  // Buy booster pack mutation
+  const buyBoosterMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest("POST", "/api/booster-packs");
+      return response.json();
     },
-    onSuccess: (pack) => {
-      setShowParticles(true);
-      const openedCards = pack.cards.map((cardId: number) => 
-        cards?.find((card: any) => card.id === cardId)
-      ).filter(Boolean);
-      setRevealedCards(openedCards);
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/booster-packs"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
+      toast({
+        title: "Booster Pack Purchased",
+        description: "New booster pack added to your collection!",
+      });
+    },
+    onError: (error) => {
+      if (isUnauthorizedError(error)) {
+        toast({
+          title: "Unauthorized",
+          description: "You are logged out. Logging in again...",
+          variant: "destructive",
+        });
+        setTimeout(() => {
+          window.location.href = "/api/login";
+        }, 500);
+        return;
+      }
+      toast({
+        title: "Error",
+        description: "Failed to purchase booster pack. Check your credits.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  // Open booster pack mutation
+  const openBoosterMutation = useMutation({
+    mutationFn: async (packId: number) => {
+      const response = await apiRequest("POST", `/api/booster-packs/${packId}/open`);
+      return response.json();
+    },
+    onSuccess: (result) => {
+      setRevealedCards(result.cards);
+      setParticlesVisible(true);
+      queryClient.invalidateQueries({ queryKey: ["/api/booster-packs"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/collection"] });
       
+      setTimeout(() => {
+        setParticlesVisible(false);
+      }, 2000);
+
       toast({
         title: "Booster Pack Opened!",
-        description: `You received ${openedCards.length} new cards!`,
+        description: `Revealed ${result.cards.length} new cards!`,
       });
-      
-      queryClient.invalidateQueries({ queryKey: ["/api/collection"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/boosters"] });
-      
-      setTimeout(() => setShowParticles(false), 2000);
+    },
+    onError: (error) => {
+      if (isUnauthorizedError(error)) {
+        toast({
+          title: "Unauthorized",
+          description: "You are logged out. Logging in again...",
+          variant: "destructive",
+        });
+        setTimeout(() => {
+          window.location.href = "/api/login";
+        }, 500);
+        return;
+      }
+      toast({
+        title: "Error",
+        description: "Failed to open booster pack",
+        variant: "destructive",
+      });
     },
   });
 
-  const availablePacks = boosterPacks?.filter((pack: any) => !pack.isOpened) || [];
-  
-  const getCardDetails = (userCard: any) => {
-    return cards?.find((card: any) => card.id === userCard.cardId);
+  // Filter cards
+  const filteredCards = userCards.filter((userCard: UserCard) => {
+    const card = userCard.card;
+    const matchesSearch = card.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         card.specialAbility?.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesRarity = selectedRarity === "All" || card.rarity === selectedRarity;
+    const matchesType = selectedType === "All" || card.type.includes(selectedType);
+    
+    return matchesSearch && matchesRarity && matchesType;
+  });
+
+  const handleOpenBooster = (packId: number) => {
+    setShowBoosterModal(true);
+    openBoosterMutation.mutate(packId);
   };
 
-  const filteredCollection = collection?.filter((userCard: any) => {
-    const card = getCardDetails(userCard);
-    if (!card) return false;
-    
-    const matchesSearch = card.name.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesType = filterType === "all" || card.type.toLowerCase().includes(filterType.toLowerCase());
-    const matchesRarity = filterRarity === "all" || card.rarity === filterRarity;
-    
-    return matchesSearch && matchesType && matchesRarity;
-  }) || [];
+  const handleCloseBoosterModal = () => {
+    setShowBoosterModal(false);
+    setRevealedCards([]);
+  };
 
   const getRarityColor = (rarity: string) => {
     switch (rarity) {
-      case "common": return "bg-gray-500";
-      case "uncommon": return "bg-green-500";
-      case "rare": return "bg-blue-500";
-      case "legendary": return "bg-purple-500";
-      default: return "bg-gray-500";
+      case "Common": return "text-gray-400 border-gray-400/30";
+      case "Uncommon": return "text-green-400 border-green-400/30";
+      case "Rare": return "text-blue-400 border-blue-400/30";
+      case "Legendary": return "text-purple-400 border-purple-400/30";
+      default: return "text-gray-400 border-gray-400/30";
     }
   };
 
-  const openBoosterPack = (packId: number) => {
-    openPackMutation.mutate(packId);
-  };
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-space-black text-star-silver flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-16 h-16 border-4 border-mystic-gold border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <div className="text-mystic-gold font-semibold">Loading collection...</div>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="min-h-screen relative z-10">
-      <NavigationHeader />
+    <div className="min-h-screen starfield-background">
+      <StarBackground />
+      <Navigation />
       
-      <main className="container mx-auto px-4 py-8">
-        <div className="flex items-center justify-between mb-8">
-          <div className="flex items-center space-x-4">
-            <Button 
-              variant="ghost" 
-              onClick={() => setLocation("/")}
-            >
-              <ArrowLeft className="mr-2 h-4 w-4" />
-              Back to Dashboard
-            </Button>
-            <h1 className="text-4xl font-bold text-glow">
-              Your Collection
-            </h1>
-          </div>
-          <div className="flex items-center space-x-2">
-            <Layers className="h-5 w-5 text-primary" />
-            <span className="text-lg font-semibold text-primary">
-              {collection?.length || 0} Cards
-            </span>
-          </div>
-        </div>
-
-        <Tabs defaultValue="collection" className="w-full">
-          <TabsList className="grid w-full grid-cols-2 mb-8">
-            <TabsTrigger value="collection" className="text-lg py-3">
-              <Layers className="mr-2 h-4 w-4" />
+      <main className="relative z-10 pt-6">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          
+          {/* Header */}
+          <div className="text-center mb-8">
+            <h1 className="text-4xl md:text-6xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-mystic-gold to-amber mb-4 animate-glow">
               Card Collection
-            </TabsTrigger>
-            <TabsTrigger value="boosters" className="text-lg py-3">
-              <Gift className="mr-2 h-4 w-4" />
-              Booster Packs ({availablePacks.length})
-            </TabsTrigger>
-          </TabsList>
+            </h1>
+            <p className="text-lg text-star-silver">
+              Total Cards: <span className="text-mystic-gold font-semibold">{userCards.length}</span>
+            </p>
+          </div>
 
-          <TabsContent value="collection">
-            {/* Filters */}
-            <div className="flex flex-wrap gap-4 mb-8 p-4 bg-card/50 backdrop-blur-sm rounded-lg border border-border">
-              <div className="flex-1 min-w-64">
-                <div className="relative">
-                  <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    placeholder="Search cards..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="pl-10"
-                  />
+          {/* Stats and Actions */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+            <Card className="card-cosmic">
+              <CardContent className="p-6 text-center">
+                <div className="text-3xl font-bold text-mystic-gold mb-2">
+                  {userCards.reduce((total: number, userCard: UserCard) => total + userCard.quantity, 0)}
                 </div>
-              </div>
-              
-              <Select value={filterType} onValueChange={setFilterType}>
-                <SelectTrigger className="w-40">
-                  <SelectValue placeholder="Card Type" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Types</SelectItem>
-                  <SelectItem value="unit">Units</SelectItem>
-                  <SelectItem value="shipyard">Shipyards</SelectItem>
-                  <SelectItem value="command">Commands</SelectItem>
-                </SelectContent>
-              </Select>
+                <div className="text-star-silver">Total Cards Owned</div>
+              </CardContent>
+            </Card>
 
-              <Select value={filterRarity} onValueChange={setFilterRarity}>
-                <SelectTrigger className="w-40">
-                  <SelectValue placeholder="Rarity" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Rarities</SelectItem>
-                  <SelectItem value="common">Common</SelectItem>
-                  <SelectItem value="uncommon">Uncommon</SelectItem>
-                  <SelectItem value="rare">Rare</SelectItem>
-                  <SelectItem value="legendary">Legendary</SelectItem>
-                </SelectContent>
-              </Select>
+            <Card className="card-cosmic">
+              <CardContent className="p-6 text-center">
+                <div className="text-3xl font-bold text-purple-400 mb-2">
+                  {userCards.filter((userCard: UserCard) => userCard.card.rarity === "Legendary").length}
+                </div>
+                <div className="text-star-silver">Legendary Cards</div>
+              </CardContent>
+            </Card>
+
+            <Card className="card-cosmic">
+              <CardContent className="p-6 text-center">
+                <div className="text-3xl font-bold text-green-400 mb-2">
+                  {user?.credits || 0}
+                </div>
+                <div className="text-star-silver">Credits Available</div>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Booster Packs Section */}
+          <div className="mb-12">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-2xl font-bold text-mystic-gold">Booster Packs</h2>
+              <Button 
+                onClick={() => buyBoosterMutation.mutate()}
+                disabled={buyBoosterMutation.isPending || (user?.credits || 0) < 100}
+                className="button-cosmic"
+              >
+                {buyBoosterMutation.isPending ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-space-black border-t-transparent rounded-full animate-spin mr-2"></div>
+                    Purchasing...
+                  </>
+                ) : (
+                  <>
+                    <i className="fas fa-shopping-cart mr-2"></i>
+                    Buy Pack (100 Credits)
+                  </>
+                )}
+              </Button>
             </div>
 
-            {/* Collection Grid */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
-              {filteredCollection.map((userCard: any) => {
-                const card = getCardDetails(userCard);
-                if (!card) return null;
-
-                return (
-                  <Card key={userCard.id} className="bg-card/80 backdrop-blur-sm border-border hover:border-primary transition-all duration-300 card-hover cursor-pointer">
-                    <CardContent className="p-3">
-                      <div className="relative mb-2">
-                        <div className="aspect-[3/4] bg-background rounded-lg overflow-hidden border border-border">
-                          {card.imageUrl ? (
-                            <img 
-                              src={card.imageUrl} 
-                              alt={card.name}
-                              className="w-full h-full object-cover"
-                            />
-                          ) : (
-                            <div className="w-full h-full flex items-center justify-center bg-muted">
-                              <Sparkles className="h-8 w-8 text-muted-foreground" />
-                            </div>
-                          )}
-                        </div>
-                        <div className="absolute top-1 right-1">
-                          <Badge className={`${getRarityColor(card.rarity)} text-white text-xs`}>
-                            {card.rarity}
-                          </Badge>
-                        </div>
-                        {userCard.quantity > 1 && (
-                          <div className="absolute bottom-1 right-1 bg-primary text-primary-foreground rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold">
-                            {userCard.quantity}
-                          </div>
-                        )}
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+              {boosterPacks
+                .filter((pack: BoosterPack) => !pack.isOpened)
+                .map((pack: BoosterPack) => (
+                  <Card key={pack.id} className="card-cosmic cursor-pointer hover:scale-105 transition-all duration-300" onClick={() => handleOpenBooster(pack.id)}>
+                    <CardContent className="p-6 text-center">
+                      <div className="w-20 h-28 bg-gradient-to-br from-mystic-gold to-amber rounded-lg mx-auto mb-4 flex items-center justify-center border-2 border-mystic-gold animate-pulse-gold">
+                        <i className="fas fa-gift text-space-black text-2xl"></i>
                       </div>
-                      <div className="text-sm font-semibold text-primary mb-1 truncate">
-                        {card.name}
-                      </div>
-                      <div className="text-xs text-muted-foreground">
-                        {card.type}
-                      </div>
-                      {card.commandCost !== undefined && (
-                        <div className="text-xs text-muted-foreground">
-                          Cost: {card.commandCost}
-                        </div>
-                      )}
-                      {card.attack !== undefined && card.defense !== undefined && (
-                        <div className="text-xs text-muted-foreground">
-                          {card.attack}/{card.defense}
-                        </div>
-                      )}
+                      <div className="text-mystic-gold font-semibold">{pack.packType} Pack</div>
+                      <div className="text-star-silver/70 text-sm">Click to open!</div>
                     </CardContent>
                   </Card>
-                );
-              })}
+                ))}
             </div>
 
-            {filteredCollection.length === 0 && (
-              <div className="text-center py-16">
-                <Layers className="h-16 w-16 text-muted-foreground mx-auto mb-4" />
-                <h3 className="text-xl font-semibold text-muted-foreground mb-2">
-                  No cards found
-                </h3>
-                <p className="text-muted-foreground">
-                  {searchTerm || filterType !== "all" || filterRarity !== "all" 
-                    ? "Try adjusting your filters" 
-                    : "Open some booster packs to start your collection!"
-                  }
-                </p>
+            {boosterPacks.filter((pack: BoosterPack) => !pack.isOpened).length === 0 && (
+              <div className="text-center py-12">
+                <i className="fas fa-gift text-6xl text-star-silver/30 mb-4"></i>
+                <p className="text-star-silver/70">No unopened booster packs. Purchase one to get started!</p>
               </div>
             )}
-          </TabsContent>
+          </div>
 
-          <TabsContent value="boosters">
-            <div className="relative">
-              {showParticles && <BoosterAnimation visible={showParticles} />}
+          {/* Filters */}
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+            <Input
+              placeholder="Search cards..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="bg-cosmic-blue/30 border-mystic-gold/30 text-star-silver placeholder-star-silver/50"
+            />
+            
+            <Select value={selectedRarity} onValueChange={setSelectedRarity}>
+              <SelectTrigger className="bg-cosmic-blue/30 border-mystic-gold/30 text-star-silver">
+                <SelectValue placeholder="All Rarities" />
+              </SelectTrigger>
+              <SelectContent className="bg-cosmic-blue border-mystic-gold/30">
+                <SelectItem value="All">All Rarities</SelectItem>
+                <SelectItem value="Common">Common</SelectItem>
+                <SelectItem value="Uncommon">Uncommon</SelectItem>
+                <SelectItem value="Rare">Rare</SelectItem>
+                <SelectItem value="Legendary">Legendary</SelectItem>
+              </SelectContent>
+            </Select>
+
+            <Select value={selectedType} onValueChange={setSelectedType}>
+              <SelectTrigger className="bg-cosmic-blue/30 border-mystic-gold/30 text-star-silver">
+                <SelectValue placeholder="All Types" />
+              </SelectTrigger>
+              <SelectContent className="bg-cosmic-blue border-mystic-gold/30">
+                <SelectItem value="All">All Types</SelectItem>
+                <SelectItem value="Shipyard">Shipyard</SelectItem>
+                <SelectItem value="Biological">Biological</SelectItem>
+                <SelectItem value="Machine">Machine</SelectItem>
+                <SelectItem value="BloodThirsty">BloodThirsty</SelectItem>
+              </SelectContent>
+            </Select>
+
+            <div className="text-star-silver flex items-center justify-center">
+              Showing {filteredCards.length} cards
+            </div>
+          </div>
+
+          {/* Cards Grid */}
+          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-6">
+            {filteredCards.map((userCard: UserCard) => (
+              <Card 
+                key={userCard.id} 
+                className={`card-cosmic cursor-pointer hover:scale-105 transition-all duration-300 ${getRarityColor(userCard.card.rarity)}`}
+                onClick={() => setSelectedCard(userCard.card)}
+              >
+                <CardContent className="p-4">
+                  <div className="aspect-[3/4] bg-cosmic-blue/50 rounded-lg mb-3 overflow-hidden">
+                    {userCard.card.imageUrl ? (
+                      <img 
+                        src={userCard.card.imageUrl} 
+                        alt={userCard.card.name}
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center">
+                        <i className="fas fa-image text-star-silver/30 text-2xl"></i>
+                      </div>
+                    )}
+                  </div>
+                  
+                  <div className="text-xs font-semibold text-mystic-gold mb-1 truncate">
+                    {userCard.card.name.replace(/_/g, ' ')}
+                  </div>
+                  
+                  <div className="text-xs text-star-silver/70 mb-2">
+                    {userCard.card.type.join(', ')}
+                  </div>
+                  
+                  {userCard.card.attack > 0 || userCard.card.defense > 0 ? (
+                    <div className="flex justify-between text-xs">
+                      <span className="text-red-400">ATK: {userCard.card.attack}</span>
+                      <span className="text-blue-400">DEF: {userCard.card.defense}</span>
+                    </div>
+                  ) : (
+                    <div className="text-xs text-center text-mystic-gold">
+                      {userCard.card.type.includes("Shipyard") ? "Command" : "Special"}
+                    </div>
+                  )}
+                  
+                  <div className="mt-2 text-center">
+                    <span className="text-xs bg-mystic-gold/20 text-mystic-gold px-2 py-1 rounded">
+                      x{userCard.quantity}
+                    </span>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+
+          {filteredCards.length === 0 && (
+            <div className="text-center py-12">
+              <i className="fas fa-search text-6xl text-star-silver/30 mb-4"></i>
+              <p className="text-star-silver/70">No cards found matching your search criteria.</p>
+            </div>
+          )}
+        </div>
+      </main>
+
+      {/* Card Detail Modal */}
+      <Dialog open={selectedCard !== null} onOpenChange={() => setSelectedCard(null)}>
+        <DialogContent className="max-w-2xl cosmic-gradient border border-mystic-gold/30">
+          {selectedCard && (
+            <>
+              <DialogHeader>
+                <DialogTitle className="text-2xl font-bold text-mystic-gold text-center">
+                  {selectedCard.name.replace(/_/g, ' ')}
+                </DialogTitle>
+              </DialogHeader>
               
-              {availablePacks.length > 0 ? (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-                  {availablePacks.map((pack: any) => (
-                    <Card key={pack.id} className="bg-card/80 backdrop-blur-sm border-border hover:border-primary transition-all duration-300 card-hover">
-                      <CardHeader className="text-center">
-                        <CardTitle className="text-primary">
-                          {pack.packType === "standard" ? "Nebula Pack" : pack.packType}
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent className="text-center">
-                        <div className="mb-6">
-                          <div className="w-32 h-48 mx-auto bg-gradient-to-br from-primary to-yellow-600 rounded-xl border-4 border-primary shadow-2xl relative overflow-hidden cursor-pointer glow-gold"
-                               onClick={() => openBoosterPack(pack.id)}>
-                            <div className="absolute inset-0 bg-gradient-to-t from-primary/30 to-transparent"></div>
-                            <div className="absolute bottom-4 left-4 right-4 text-center">
-                              <div className="text-black font-bold text-lg">Nebula Pack</div>
-                              <div className="text-black/80 text-sm">5 Random Cards</div>
-                            </div>
-                            <Gift className="absolute top-4 right-4 h-6 w-6 text-black" />
-                          </div>
-                        </div>
-                        
-                        <Button 
-                          className="w-full glow-gold"
-                          onClick={() => openBoosterPack(pack.id)}
-                          disabled={openPackMutation.isPending}
-                        >
-                          {openPackMutation.isPending ? "Opening..." : "Open Pack"}
-                        </Button>
-                      </CardContent>
-                    </Card>
-                  ))}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="aspect-[3/4] bg-cosmic-blue/50 rounded-lg overflow-hidden">
+                  {selectedCard.imageUrl ? (
+                    <img 
+                      src={selectedCard.imageUrl} 
+                      alt={selectedCard.name}
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center">
+                      <i className="fas fa-image text-star-silver/30 text-4xl"></i>
+                    </div>
+                  )}
                 </div>
-              ) : (
-                <div className="text-center py-16">
-                  <Gift className="h-16 w-16 text-muted-foreground mx-auto mb-4" />
-                  <h3 className="text-xl font-semibold text-muted-foreground mb-2">
-                    No booster packs available
-                  </h3>
-                  <p className="text-muted-foreground mb-6">
-                    Earn more packs by playing games and completing challenges
-                  </p>
-                  <Button onClick={() => setLocation("/")}>
-                    Return to Dashboard
-                  </Button>
+                
+                <div className="space-y-4">
+                  <div>
+                    <h4 className="font-semibold text-mystic-gold mb-2">Type</h4>
+                    <p className="text-star-silver">{selectedCard.type.join(', ')}</p>
+                  </div>
+                  
+                  <div className="grid grid-cols-3 gap-4">
+                    <div className="text-center">
+                      <div className="text-xs text-star-silver/70">Cost</div>
+                      <div className="text-mystic-gold font-bold">{selectedCard.commandCost}</div>
+                    </div>
+                    <div className="text-center">
+                      <div className="text-xs text-star-silver/70">Attack</div>
+                      <div className="text-red-400 font-bold">{selectedCard.attack}</div>
+                    </div>
+                    <div className="text-center">
+                      <div className="text-xs text-star-silver/70">Defense</div>
+                      <div className="text-blue-400 font-bold">{selectedCard.defense}</div>
+                    </div>
+                  </div>
+                  
+                  <div>
+                    <h4 className="font-semibold text-mystic-gold mb-2">Special Ability</h4>
+                    <p className="text-star-silver text-sm bg-space-black/30 p-3 rounded">
+                      {selectedCard.specialAbility || "No special ability"}
+                    </p>
+                  </div>
+                  
+                  <div>
+                    <h4 className="font-semibold text-mystic-gold mb-2">Rarity</h4>
+                    <span className={`px-3 py-1 rounded text-sm ${getRarityColor(selectedCard.rarity)}`}>
+                      {selectedCard.rarity}
+                    </span>
+                  </div>
                 </div>
-              )}
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
 
-              {/* Revealed Cards Modal */}
+      {/* Booster Opening Modal */}
+      <Dialog open={showBoosterModal} onOpenChange={handleCloseBoosterModal}>
+        <DialogContent className="max-w-4xl cosmic-gradient border border-mystic-gold/30">
+          <DialogHeader>
+            <DialogTitle className="text-3xl font-bold text-mystic-gold text-center mb-4">
+              <i className="fas fa-gift mr-3"></i>
+              Booster Pack Opening
+            </DialogTitle>
+          </DialogHeader>
+          
+          {openBoosterMutation.isPending ? (
+            <div className="text-center py-12">
+              <div className="w-20 h-28 bg-gradient-to-br from-mystic-gold to-amber rounded-lg mx-auto mb-4 flex items-center justify-center border-2 border-mystic-gold animate-pulse-gold">
+                <i className="fas fa-gift text-space-black text-3xl"></i>
+              </div>
+              <p className="text-star-silver">Opening booster pack...</p>
+            </div>
+          ) : (
+            <>
               {revealedCards.length > 0 && (
-                <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50">
-                  <div className="bg-card rounded-2xl p-8 max-w-4xl mx-4 border border-primary">
-                    <h2 className="text-3xl font-bold text-center text-primary mb-6">
-                      Cards Revealed!
-                    </h2>
-                    
-                    <div className="grid grid-cols-5 gap-4 mb-6">
-                      {revealedCards.map((card, index) => (
-                        <div key={index} className="relative">
-                          <div className="aspect-[3/4] bg-background rounded-lg overflow-hidden border-2 border-primary">
+                <>
+                  <div className="text-center mb-6">
+                    <h3 className="text-xl font-bold text-mystic-gold mb-2">Cards Revealed!</h3>
+                    <p className="text-star-silver/70">These cards have been added to your collection</p>
+                  </div>
+                  
+                  <div className="grid grid-cols-5 gap-4 mb-6">
+                    {revealedCards.map((card, index) => (
+                      <Card key={index} className={`card-cosmic animate-card-hover ${getRarityColor(card.rarity)}`} style={{ animationDelay: `${index * 200}ms` }}>
+                        <CardContent className="p-3">
+                          <div className="aspect-[3/4] bg-cosmic-blue/50 rounded mb-2 overflow-hidden">
                             {card.imageUrl ? (
                               <img 
                                 src={card.imageUrl} 
@@ -316,37 +481,39 @@ export default function Collection() {
                                 className="w-full h-full object-cover"
                               />
                             ) : (
-                              <div className="w-full h-full flex items-center justify-center bg-muted">
-                                <Sparkles className="h-8 w-8 text-muted-foreground" />
+                              <div className="w-full h-full flex items-center justify-center">
+                                <i className="fas fa-image text-star-silver/30"></i>
                               </div>
                             )}
                           </div>
-                          <div className="absolute top-1 right-1">
-                            <Badge className={`${getRarityColor(card.rarity)} text-white text-xs`}>
+                          <div className="text-xs text-mystic-gold font-semibold truncate">
+                            {card.name.replace(/_/g, ' ')}
+                          </div>
+                          <div className="text-xs text-center mt-1">
+                            <span className={`${getRarityColor(card.rarity)}`}>
                               {card.rarity}
-                            </Badge>
+                            </span>
                           </div>
-                          <div className="text-center mt-2">
-                            <div className="text-sm font-semibold text-primary">
-                              {card.name}
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                    
-                    <div className="text-center">
-                      <Button onClick={() => setRevealedCards([])}>
-                        Add to Collection
-                      </Button>
-                    </div>
+                        </CardContent>
+                      </Card>
+                    ))}
                   </div>
-                </div>
+                  
+                  <div className="text-center">
+                    <Button onClick={handleCloseBoosterModal} className="button-cosmic">
+                      <i className="fas fa-check mr-2"></i>
+                      Continue
+                    </Button>
+                  </div>
+                </>
               )}
-            </div>
-          </TabsContent>
-        </Tabs>
-      </main>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Particle Effect */}
+      {particlesVisible && <BoosterAnimation visible={particlesVisible} />}
     </div>
   );
 }

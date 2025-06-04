@@ -1,191 +1,306 @@
-import { useEffect, useState } from "react";
-import { useParams } from "wouter";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/useAuth";
-import { useWebSocket } from "@/hooks/useWebSocket";
-import NavigationHeader from "@/components/NavigationHeader";
-import GameInterface from "@/components/GameInterface";
+import { useToast } from "@/hooks/use-toast";
+import { isUnauthorizedError } from "@/lib/authUtils";
+import Navigation from "@/components/ui/navigation";
+import GameInterface from "@/components/game/GameInterface";
+import StarBackground from "@/components/game/StarBackground";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Loader2, Zap, Users, ArrowLeft } from "lucide-react";
-import { useLocation } from "wouter";
+import { Card, CardContent } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { apiRequest } from "@/lib/queryClient";
 
+interface Game {
+  id: number;
+  status: string;
+  isAIGame: boolean;
+  aiDifficulty?: string;
+  currentPhase: string;
+  currentTurn: number;
+  player1Health: number;
+  player2Health: number;
+}
+
 export default function Game() {
-  const { id } = useParams();
-  const { user } = useAuth();
-  const [, setLocation] = useLocation();
+  const { user, isAuthenticated, isLoading } = useAuth();
+  const { toast } = useToast();
   const queryClient = useQueryClient();
-  const [gameId, setGameId] = useState<number | null>(id ? parseInt(id) : null);
+  const [selectedGame, setSelectedGame] = useState<Game | null>(null);
+  const [showGameModes, setShowGameModes] = useState(true);
 
-  const { data: game, isLoading } = useQuery({
-    queryKey: ["/api/games", gameId],
-    enabled: !!gameId,
-  });
-
-  const { socket, isConnected } = useWebSocket();
-
-  const createGameMutation = useMutation({
-    mutationFn: async (gameMode: string) => {
-      const response = await apiRequest("POST", "/api/games", { gameMode });
-      return await response.json();
-    },
-    onSuccess: (newGame) => {
-      setGameId(newGame.id);
-      queryClient.invalidateQueries({ queryKey: ["/api/games"] });
-    },
-  });
-
+  // Redirect to login if not authenticated
   useEffect(() => {
-    if (gameId && socket && isConnected) {
-      socket.send(JSON.stringify({ type: 'join_game', gameId }));
+    if (!isLoading && !isAuthenticated) {
+      toast({
+        title: "Unauthorized",
+        description: "You are logged out. Logging in again...",
+        variant: "destructive",
+      });
+      setTimeout(() => {
+        window.location.href = "/api/login";
+      }, 500);
+      return;
     }
-  }, [gameId, socket, isConnected]);
+  }, [isAuthenticated, isLoading, toast]);
 
-  const startAIGame = () => {
-    createGameMutation.mutate("ai");
+  // Fetch active games
+  const { data: activeGames = [], isLoading: gamesLoading } = useQuery({
+    queryKey: ["/api/games/active"],
+    enabled: isAuthenticated,
+    retry: false,
+  });
+
+  // Create AI game mutation
+  const createAIGameMutation = useMutation({
+    mutationFn: async (difficulty: string) => {
+      const response = await apiRequest("POST", "/api/games/ai", { difficulty });
+      return response.json();
+    },
+    onSuccess: (game) => {
+      setSelectedGame(game);
+      setShowGameModes(false);
+      queryClient.invalidateQueries({ queryKey: ["/api/games/active"] });
+      toast({
+        title: "Game Created",
+        description: `AI game started with ${game.aiDifficulty} difficulty`,
+      });
+    },
+    onError: (error) => {
+      if (isUnauthorizedError(error)) {
+        toast({
+          title: "Unauthorized",
+          description: "You are logged out. Logging in again...",
+          variant: "destructive",
+        });
+        setTimeout(() => {
+          window.location.href = "/api/login";
+        }, 500);
+        return;
+      }
+      toast({
+        title: "Error",
+        description: "Failed to create AI game",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleStartAIGame = (difficulty: string) => {
+    createAIGameMutation.mutate(difficulty);
   };
 
-  const startMultiplayerGame = () => {
-    createGameMutation.mutate("multiplayer");
+  const handleResumeGame = (game: Game) => {
+    setSelectedGame(game);
+    setShowGameModes(false);
   };
 
-  if (!gameId) {
-    return (
-      <div className="min-h-screen relative z-10">
-        <NavigationHeader />
-        
-        <main className="container mx-auto px-4 py-8">
-          <div className="text-center mb-8">
-            <Button 
-              variant="ghost" 
-              onClick={() => setLocation("/")}
-              className="mb-4"
-            >
-              <ArrowLeft className="mr-2 h-4 w-4" />
-              Back to Dashboard
-            </Button>
-            
-            <h1 className="text-4xl font-bold text-glow mb-4">
-              Choose Your Battle
-            </h1>
-            <p className="text-xl text-muted-foreground">
-              Select a game mode to begin your cosmic conquest
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-4xl mx-auto">
-            <Card className="bg-card/80 backdrop-blur-sm border-border hover:border-primary transition-all duration-300 card-hover">
-              <CardHeader>
-                <div className="w-20 h-20 bg-gradient-to-r from-red-500 to-red-600 rounded-full flex items-center justify-center mx-auto mb-4">
-                  <Zap className="text-white text-3xl" />
-                </div>
-                <CardTitle className="text-center text-primary text-2xl">AI Battle</CardTitle>
-              </CardHeader>
-              <CardContent className="text-center">
-                <CardDescription className="mb-6 text-lg">
-                  Test your skills against advanced AI commanders with varying difficulty levels. 
-                  Perfect for practicing strategies and learning the game.
-                </CardDescription>
-                <div className="space-y-4">
-                  <div className="flex justify-center space-x-2 mb-6">
-                    <span className="px-3 py-1 bg-green-600 text-white text-sm rounded-full">Easy</span>
-                    <span className="px-3 py-1 bg-yellow-600 text-white text-sm rounded-full">Medium</span>
-                    <span className="px-3 py-1 bg-red-600 text-white text-sm rounded-full">Hard</span>
-                  </div>
-                  <Button 
-                    size="lg" 
-                    className="w-full text-lg py-4"
-                    onClick={startAIGame}
-                    disabled={createGameMutation.isPending}
-                  >
-                    {createGameMutation.isPending ? (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    ) : (
-                      <Zap className="mr-2" />
-                    )}
-                    Start AI Battle
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="bg-card/80 backdrop-blur-sm border-border hover:border-primary transition-all duration-300 card-hover">
-              <CardHeader>
-                <div className="w-20 h-20 bg-gradient-to-r from-blue-500 to-blue-600 rounded-full flex items-center justify-center mx-auto mb-4">
-                  <Users className="text-white text-3xl" />
-                </div>
-                <CardTitle className="text-center text-primary text-2xl">Multiplayer</CardTitle>
-              </CardHeader>
-              <CardContent className="text-center">
-                <CardDescription className="mb-6 text-lg">
-                  Challenge other players in real-time battles. Climb the rankings 
-                  and prove your worth as the ultimate space commander.
-                </CardDescription>
-                <div className="space-y-4">
-                  <div className="flex justify-center mb-6">
-                    <span className="px-4 py-2 bg-gradient-to-r from-primary to-yellow-600 text-black text-sm font-semibold rounded-full">
-                      Ranked Mode
-                    </span>
-                  </div>
-                  <Button 
-                    size="lg" 
-                    variant="outline"
-                    className="w-full text-lg py-4"
-                    onClick={startMultiplayerGame}
-                    disabled={createGameMutation.isPending}
-                  >
-                    {createGameMutation.isPending ? (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    ) : (
-                      <Users className="mr-2" />
-                    )}
-                    Find Opponent
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-
-          {createGameMutation.error && (
-            <div className="text-center mt-8">
-              <p className="text-destructive">
-                Failed to create game. Please try again.
-              </p>
-            </div>
-          )}
-        </main>
-      </div>
-    );
-  }
+  const handleExitGame = () => {
+    setSelectedGame(null);
+    setShowGameModes(true);
+    queryClient.invalidateQueries({ queryKey: ["/api/games/active"] });
+  };
 
   if (isLoading) {
     return (
-      <div className="min-h-screen relative z-10 flex items-center justify-center">
+      <div className="min-h-screen bg-space-black text-star-silver flex items-center justify-center">
         <div className="text-center">
-          <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4 text-primary" />
-          <p className="text-lg text-muted-foreground">Loading game...</p>
+          <div className="w-16 h-16 border-4 border-mystic-gold border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <div className="text-mystic-gold font-semibold">Loading game...</div>
         </div>
       </div>
     );
   }
 
-  if (!game) {
+  if (!isAuthenticated) {
+    return null; // Will redirect in useEffect
+  }
+
+  if (selectedGame) {
     return (
-      <div className="min-h-screen relative z-10 flex items-center justify-center">
-        <div className="text-center">
-          <p className="text-lg text-destructive mb-4">Game not found</p>
-          <Button onClick={() => setLocation("/")}>
-            Return to Dashboard
-          </Button>
-        </div>
+      <div className="min-h-screen starfield-background">
+        <StarBackground />
+        <GameInterface 
+          game={selectedGame} 
+          onExitGame={handleExitGame}
+          user={user}
+        />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen relative z-10">
-      <GameInterface game={game} socket={socket} />
+    <div className="min-h-screen starfield-background">
+      <StarBackground />
+      <Navigation />
+      
+      <main className="relative z-10 pt-6">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          
+          {/* Hero Section */}
+          <div className="text-center mb-12">
+            <h1 className="text-5xl md:text-7xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-mystic-gold to-amber mb-6 animate-glow">
+              Command Center
+            </h1>
+            <p className="text-xl text-star-silver mb-8 max-w-2xl mx-auto">
+              Choose your battle mode and prepare for cosmic warfare
+            </p>
+          </div>
+
+          {/* Active Games */}
+          {activeGames.length > 0 && (
+            <div className="mb-12">
+              <h2 className="text-2xl font-bold text-mystic-gold mb-6 text-center">Active Games</h2>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {activeGames.map((game: Game) => (
+                  <Card key={game.id} className="card-cosmic hover:scale-105 transition-all duration-300 cursor-pointer" onClick={() => handleResumeGame(game)}>
+                    <CardContent className="p-6">
+                      <div className="flex items-center justify-between mb-4">
+                        <div className="text-mystic-gold font-semibold">
+                          {game.isAIGame ? `AI Game (${game.aiDifficulty})` : "Multiplayer"}
+                        </div>
+                        <div className="text-sm text-star-silver/70">
+                          Turn {game.currentTurn}
+                        </div>
+                      </div>
+                      <div className="space-y-2">
+                        <div className="text-sm text-star-silver">
+                          Phase: <span className="text-mystic-gold">{game.currentPhase}</span>
+                        </div>
+                        <div className="flex justify-between text-sm">
+                          <span>Your Health: <span className="text-green-400">{game.player1Health}</span></span>
+                          <span>Opponent: <span className="text-red-400">{game.player2Health}</span></span>
+                        </div>
+                      </div>
+                      <Button className="w-full mt-4 button-cosmic-secondary">
+                        <i className="fas fa-play mr-2"></i>
+                        Resume Game
+                      </Button>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Game Modes */}
+          <Dialog open={showGameModes} onOpenChange={setShowGameModes}>
+            <DialogContent className="max-w-4xl cosmic-gradient border border-mystic-gold/30">
+              <DialogHeader>
+                <DialogTitle className="text-3xl font-bold text-mystic-gold text-center mb-4">
+                  Select Game Mode
+                </DialogTitle>
+              </DialogHeader>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                
+                {/* Quick Match - Easy AI */}
+                <Card className="card-cosmic group hover:scale-105 transition-all duration-300 cursor-pointer" onClick={() => handleStartAIGame("Easy")}>
+                  <CardContent className="p-6 text-center">
+                    <div className="w-16 h-16 bg-gradient-to-br from-green-500 to-green-700 rounded-full flex items-center justify-center mx-auto mb-4 group-hover:animate-pulse">
+                      <i className="fas fa-leaf text-white text-2xl"></i>
+                    </div>
+                    <h3 className="text-xl font-bold text-mystic-gold mb-2">Easy AI</h3>
+                    <p className="text-star-silver/80 mb-4">Perfect for beginners. Learn the basics against a forgiving AI opponent.</p>
+                    <div className="flex justify-center space-x-2">
+                      <span className="px-3 py-1 bg-green-600/20 text-green-400 text-xs rounded-full border border-green-400/30">
+                        Beginner Friendly
+                      </span>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Medium AI */}
+                <Card className="card-cosmic group hover:scale-105 transition-all duration-300 cursor-pointer" onClick={() => handleStartAIGame("Medium")}>
+                  <CardContent className="p-6 text-center">
+                    <div className="w-16 h-16 bg-gradient-to-br from-yellow-500 to-yellow-700 rounded-full flex items-center justify-center mx-auto mb-4 group-hover:animate-pulse">
+                      <i className="fas fa-bolt text-white text-2xl"></i>
+                    </div>
+                    <h3 className="text-xl font-bold text-mystic-gold mb-2">Medium AI</h3>
+                    <p className="text-star-silver/80 mb-4">Balanced challenge for intermediate players. Strategic but fair gameplay.</p>
+                    <div className="flex justify-center space-x-2">
+                      <span className="px-3 py-1 bg-yellow-600/20 text-yellow-400 text-xs rounded-full border border-yellow-400/30">
+                        Recommended
+                      </span>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Hard AI */}
+                <Card className="card-cosmic group hover:scale-105 transition-all duration-300 cursor-pointer" onClick={() => handleStartAIGame("Hard")}>
+                  <CardContent className="p-6 text-center">
+                    <div className="w-16 h-16 bg-gradient-to-br from-red-500 to-red-700 rounded-full flex items-center justify-center mx-auto mb-4 group-hover:animate-pulse">
+                      <i className="fas fa-skull text-white text-2xl"></i>
+                    </div>
+                    <h3 className="text-xl font-bold text-mystic-gold mb-2">Hard AI</h3>
+                    <p className="text-star-silver/80 mb-4">Ultimate challenge for experienced commanders. No mercy.</p>
+                    <div className="flex justify-center space-x-2">
+                      <span className="px-3 py-1 bg-red-600/20 text-red-400 text-xs rounded-full border border-red-400/30">
+                        Expert Only
+                      </span>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Multiplayer (Coming Soon) */}
+                <Card className="card-cosmic opacity-50 cursor-not-allowed">
+                  <CardContent className="p-6 text-center">
+                    <div className="w-16 h-16 bg-gradient-to-br from-blue-500 to-blue-700 rounded-full flex items-center justify-center mx-auto mb-4">
+                      <i className="fas fa-users text-white text-2xl"></i>
+                    </div>
+                    <h3 className="text-xl font-bold text-mystic-gold mb-2">Multiplayer</h3>
+                    <p className="text-star-silver/80 mb-4">Battle against other commanders in real-time matches.</p>
+                    <div className="flex justify-center space-x-2">
+                      <span className="px-3 py-1 bg-blue-600/20 text-blue-400 text-xs rounded-full border border-blue-400/30">
+                        Coming Soon
+                      </span>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Ranked (Coming Soon) */}
+                <Card className="card-cosmic opacity-50 cursor-not-allowed">
+                  <CardContent className="p-6 text-center">
+                    <div className="w-16 h-16 bg-gradient-to-br from-purple-500 to-purple-700 rounded-full flex items-center justify-center mx-auto mb-4">
+                      <i className="fas fa-trophy text-white text-2xl"></i>
+                    </div>
+                    <h3 className="text-xl font-bold text-mystic-gold mb-2">Ranked Play</h3>
+                    <p className="text-star-silver/80 mb-4">Compete for glory on the galactic leaderboards.</p>
+                    <div className="flex justify-center space-x-2">
+                      <span className="px-3 py-1 bg-purple-600/20 text-purple-400 text-xs rounded-full border border-purple-400/30">
+                        Coming Soon
+                      </span>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Tournament (Coming Soon) */}
+                <Card className="card-cosmic opacity-50 cursor-not-allowed">
+                  <CardContent className="p-6 text-center">
+                    <div className="w-16 h-16 bg-gradient-to-br from-orange-500 to-orange-700 rounded-full flex items-center justify-center mx-auto mb-4">
+                      <i className="fas fa-crown text-white text-2xl"></i>
+                    </div>
+                    <h3 className="text-xl font-bold text-mystic-gold mb-2">Tournaments</h3>
+                    <p className="text-star-silver/80 mb-4">Enter prestigious tournaments for ultimate rewards.</p>
+                    <div className="flex justify-center space-x-2">
+                      <span className="px-3 py-1 bg-orange-600/20 text-orange-400 text-xs rounded-full border border-orange-400/30">
+                        Coming Soon
+                      </span>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+
+              {createAIGameMutation.isPending && (
+                <div className="text-center mt-6">
+                  <div className="w-8 h-8 border-4 border-mystic-gold border-t-transparent rounded-full animate-spin mx-auto mb-2"></div>
+                  <p className="text-star-silver">Preparing battle...</p>
+                </div>
+              )}
+            </DialogContent>
+          </Dialog>
+        </div>
+      </main>
     </div>
   );
 }

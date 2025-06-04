@@ -3,14 +3,15 @@ import { createServer, type Server } from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import { storage } from "./storage";
 import { setupAuth, isAuthenticated } from "./replitAuth";
-import { gameEngine } from "./gameEngine";
-import { aiEngine } from "./aiEngine";
 import { z } from "zod";
 import { insertDeckSchema, insertGameSchema, insertBoosterPackSchema } from "@shared/schema";
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Auth middleware
   await setupAuth(app);
+
+  // Seed initial cards if none exist
+  await seedInitialCards();
 
   // Auth routes
   app.get('/api/auth/user', isAuthenticated, async (req: any, res) => {
@@ -24,22 +25,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // User profile routes
-  app.get('/api/profile/stats', isAuthenticated, async (req: any, res) => {
-    try {
-      const userId = req.user.claims.sub;
-      const stats = await storage.getUserStats(userId);
-      res.json(stats);
-    } catch (error) {
-      console.error("Error fetching user stats:", error);
-      res.status(500).json({ message: "Failed to fetch user stats" });
-    }
-  });
-
   // Card routes
   app.get('/api/cards', async (req, res) => {
     try {
-      const cards = await storage.getAllCards();
+      const cards = await storage.getCards();
       res.json(cards);
     } catch (error) {
       console.error("Error fetching cards:", error);
@@ -47,14 +36,42 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.get('/api/cards/:id', async (req, res) => {
+    try {
+      const cardId = parseInt(req.params.id);
+      const card = await storage.getCard(cardId);
+      if (!card) {
+        return res.status(404).json({ message: "Card not found" });
+      }
+      res.json(card);
+    } catch (error) {
+      console.error("Error fetching card:", error);
+      res.status(500).json({ message: "Failed to fetch card" });
+    }
+  });
+
+  // User collection routes
   app.get('/api/collection', isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user.claims.sub;
-      const collection = await storage.getUserCollection(userId);
-      res.json(collection);
+      const userCards = await storage.getUserCards(userId);
+      res.json(userCards);
     } catch (error) {
       console.error("Error fetching collection:", error);
       res.status(500).json({ message: "Failed to fetch collection" });
+    }
+  });
+
+  app.post('/api/collection/add', isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { cardId, quantity = 1 } = req.body;
+      
+      const userCard = await storage.addCardToUser(userId, cardId, quantity);
+      res.json(userCard);
+    } catch (error) {
+      console.error("Error adding card to collection:", error);
+      res.status(500).json({ message: "Failed to add card to collection" });
     }
   });
 
@@ -70,132 +87,147 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.get('/api/decks/:id', async (req, res) => {
+    try {
+      const deckId = parseInt(req.params.id);
+      const deck = await storage.getDeck(deckId);
+      if (!deck) {
+        return res.status(404).json({ message: "Deck not found" });
+      }
+      res.json(deck);
+    } catch (error) {
+      console.error("Error fetching deck:", error);
+      res.status(500).json({ message: "Failed to fetch deck" });
+    }
+  });
+
   app.post('/api/decks', isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user.claims.sub;
-      const deckData = insertDeckSchema.parse(req.body);
-      const deck = await storage.createDeck({ ...deckData, userId });
+      const deckData = insertDeckSchema.parse({ ...req.body, userId });
+      
+      const deck = await storage.createDeck(deckData);
       res.json(deck);
     } catch (error) {
       console.error("Error creating deck:", error);
-      res.status(400).json({ message: "Failed to create deck" });
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid deck data", errors: error.errors });
+      }
+      res.status(500).json({ message: "Failed to create deck" });
     }
   });
 
   app.put('/api/decks/:id', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
       const deckId = parseInt(req.params.id);
-      const deckData = insertDeckSchema.parse(req.body);
-      const deck = await storage.updateDeck(deckId, userId, deckData);
+      const updates = req.body;
+      
+      const deck = await storage.updateDeck(deckId, updates);
       res.json(deck);
     } catch (error) {
       console.error("Error updating deck:", error);
-      res.status(400).json({ message: "Failed to update deck" });
+      res.status(500).json({ message: "Failed to update deck" });
     }
   });
 
   app.delete('/api/decks/:id', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
       const deckId = parseInt(req.params.id);
-      await storage.deleteDeck(deckId, userId);
+      await storage.deleteDeck(deckId);
       res.json({ message: "Deck deleted successfully" });
     } catch (error) {
       console.error("Error deleting deck:", error);
-      res.status(400).json({ message: "Failed to delete deck" });
+      res.status(500).json({ message: "Failed to delete deck" });
+    }
+  });
+
+  app.post('/api/decks/:id/cards', isAuthenticated, async (req: any, res) => {
+    try {
+      const deckId = parseInt(req.params.id);
+      const { cardId, quantity = 1 } = req.body;
+      
+      const deckCard = await storage.addCardToDeck(deckId, cardId, quantity);
+      res.json(deckCard);
+    } catch (error) {
+      console.error("Error adding card to deck:", error);
+      res.status(500).json({ message: "Failed to add card to deck" });
+    }
+  });
+
+  app.delete('/api/decks/:id/cards/:cardId', isAuthenticated, async (req: any, res) => {
+    try {
+      const deckId = parseInt(req.params.id);
+      const cardId = parseInt(req.params.cardId);
+      
+      await storage.removeCardFromDeck(deckId, cardId);
+      res.json({ message: "Card removed from deck" });
+    } catch (error) {
+      console.error("Error removing card from deck:", error);
+      res.status(500).json({ message: "Failed to remove card from deck" });
+    }
+  });
+
+  app.put('/api/decks/:id/activate', isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const deckId = parseInt(req.params.id);
+      
+      await storage.setActiveDeck(userId, deckId);
+      res.json({ message: "Deck activated successfully" });
+    } catch (error) {
+      console.error("Error activating deck:", error);
+      res.status(500).json({ message: "Failed to activate deck" });
     }
   });
 
   // Game routes
+  app.get('/api/games/active', isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const games = await storage.getActiveGames(userId);
+      res.json(games);
+    } catch (error) {
+      console.error("Error fetching active games:", error);
+      res.status(500).json({ message: "Failed to fetch active games" });
+    }
+  });
+
+  app.get('/api/games/history', isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const limit = parseInt(req.query.limit as string) || 20;
+      const games = await storage.getGameHistory(userId, limit);
+      res.json(games);
+    } catch (error) {
+      console.error("Error fetching game history:", error);
+      res.status(500).json({ message: "Failed to fetch game history" });
+    }
+  });
+
   app.post('/api/games/ai', isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user.claims.sub;
-      const { difficulty, deckId } = req.body;
+      const { difficulty = "Medium" } = req.body;
       
-      if (!['easy', 'medium', 'hard'].includes(difficulty)) {
-        return res.status(400).json({ message: "Invalid difficulty level" });
-      }
-
-      const deck = await storage.getDeck(deckId, userId);
-      if (!deck) {
-        return res.status(400).json({ message: "Deck not found" });
-      }
-
-      const gameData = insertGameSchema.parse({
-        player1Id: userId,
-        isAIGame: true,
-        aiDifficulty: difficulty,
-        currentPlayer: userId,
-        gameState: await gameEngine.initializeGame(deck, difficulty),
-      });
-
-      const game = await storage.createGame(gameData);
+      const game = await storage.createAIGame(userId, difficulty);
       res.json(game);
     } catch (error) {
       console.error("Error creating AI game:", error);
-      res.status(400).json({ message: "Failed to create AI game" });
+      res.status(500).json({ message: "Failed to create AI game" });
     }
   });
 
-  app.get('/api/games/:id', isAuthenticated, async (req: any, res) => {
+  app.get('/api/games/:id', async (req, res) => {
     try {
-      const userId = req.user.claims.sub;
       const gameId = parseInt(req.params.id);
-      const game = await storage.getGame(gameId, userId);
-      res.json(game);
-    } catch (error) {
-      console.error("Error fetching game:", error);
-      res.status(404).json({ message: "Game not found" });
-    }
-  });
-
-  app.post('/api/games/:id/action', isAuthenticated, async (req: any, res) => {
-    try {
-      const userId = req.user.claims.sub;
-      const gameId = parseInt(req.params.id);
-      const { action, data } = req.body;
-
-      const game = await storage.getGame(gameId, userId);
+      const game = await storage.getGame(gameId);
       if (!game) {
         return res.status(404).json({ message: "Game not found" });
       }
-
-      if (game.currentPlayer !== userId) {
-        return res.status(400).json({ message: "Not your turn" });
-      }
-
-      let newGameState;
-      if (game.isAIGame) {
-        newGameState = await gameEngine.processPlayerAction(game.gameState, action, data);
-        if (newGameState.currentPlayer !== userId) {
-          // AI turn
-          const aiAction = await aiEngine.getAIAction(newGameState, game.aiDifficulty);
-          newGameState = await gameEngine.processAIAction(newGameState, aiAction);
-        }
-      } else {
-        newGameState = await gameEngine.processPlayerAction(game.gameState, action, data);
-      }
-
-      const updatedGame = await storage.updateGameState(gameId, newGameState);
-      
-      // Broadcast to WebSocket clients if multiplayer
-      if (!game.isAIGame && gameClients.has(gameId)) {
-        const clients = gameClients.get(gameId)!;
-        clients.forEach(client => {
-          if (client.readyState === WebSocket.OPEN) {
-            client.send(JSON.stringify({
-              type: 'gameUpdate',
-              game: updatedGame
-            }));
-          }
-        });
-      }
-
-      res.json(updatedGame);
+      res.json(game);
     } catch (error) {
-      console.error("Error processing game action:", error);
-      res.status(400).json({ message: "Failed to process action" });
+      console.error("Error fetching game:", error);
+      res.status(500).json({ message: "Failed to fetch game" });
     }
   });
 
@@ -211,34 +243,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post('/api/booster-packs/purchase', isAuthenticated, async (req: any, res) => {
+  app.post('/api/booster-packs', isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user.claims.sub;
-      const { packType, quantity = 1 } = req.body;
-      
-      const cost = packType === 'premium' ? 500 : 200;
-      const totalCost = cost * quantity;
-
       const user = await storage.getUser(userId);
-      if (!user || user.credits < totalCost) {
+      
+      if (!user || user.credits < 100) {
         return res.status(400).json({ message: "Insufficient credits" });
       }
 
-      const packs = [];
-      for (let i = 0; i < quantity; i++) {
-        const packData = insertBoosterPackSchema.parse({
-          userId,
-          packType,
-        });
-        const pack = await storage.createBoosterPack(packData);
-        packs.push(pack);
-      }
-
-      await storage.updateUserCredits(userId, user.credits - totalCost);
-      res.json(packs);
+      // Create booster pack
+      const pack = await storage.createBoosterPack({ userId, packType: "Standard" });
+      
+      // Deduct credits
+      await storage.updateUserStats(userId, { credits: -100 });
+      
+      res.json(pack);
     } catch (error) {
-      console.error("Error purchasing booster pack:", error);
-      res.status(400).json({ message: "Failed to purchase booster pack" });
+      console.error("Error creating booster pack:", error);
+      res.status(500).json({ message: "Failed to create booster pack" });
     }
   });
 
@@ -247,88 +270,97 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userId = req.user.claims.sub;
       const packId = parseInt(req.params.id);
       
-      const pack = await storage.getBoosterPack(packId, userId);
-      if (!pack || pack.isOpened) {
-        return res.status(400).json({ message: "Pack not found or already opened" });
-      }
-
-      const cards = await storage.generateBoosterPackCards(pack.packType);
-      const openedPack = await storage.openBoosterPack(packId, cards);
+      const result = await storage.openBoosterPack(packId);
       
       // Add cards to user collection
-      for (const cardId of cards) {
-        await storage.addCardToCollection(userId, cardId);
+      for (const card of result.cards) {
+        await storage.addCardToUser(userId, card.id, 1);
       }
-
-      res.json({ pack: openedPack, cards });
+      
+      res.json(result);
     } catch (error) {
       console.error("Error opening booster pack:", error);
-      res.status(400).json({ message: "Failed to open booster pack" });
+      res.status(500).json({ message: "Failed to open booster pack" });
     }
   });
 
-  // Rankings route
-  app.get('/api/rankings', async (req, res) => {
+  // Leaderboard
+  app.get('/api/leaderboard', async (req, res) => {
     try {
-      const rankings = await storage.getUserRankings();
-      res.json(rankings);
+      const limit = parseInt(req.query.limit as string) || 50;
+      const leaderboard = await storage.getLeaderboard(limit);
+      res.json(leaderboard);
     } catch (error) {
-      console.error("Error fetching rankings:", error);
-      res.status(500).json({ message: "Failed to fetch rankings" });
-    }
-  });
-
-  // Achievements routes
-  app.get('/api/achievements', isAuthenticated, async (req: any, res) => {
-    try {
-      const userId = req.user.claims.sub;
-      const achievements = await storage.getUserAchievements(userId);
-      res.json(achievements);
-    } catch (error) {
-      console.error("Error fetching achievements:", error);
-      res.status(500).json({ message: "Failed to fetch achievements" });
+      console.error("Error fetching leaderboard:", error);
+      res.status(500).json({ message: "Failed to fetch leaderboard" });
     }
   });
 
   // Create HTTP server
   const httpServer = createServer(app);
 
-  // WebSocket setup for multiplayer
+  // Setup WebSocket for real-time multiplayer
   const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
-  const gameClients = new Map<number, Set<WebSocket>>();
+  
+  const gameRooms = new Map<number, Set<WebSocket>>();
+  const userConnections = new Map<string, WebSocket>();
 
-  wss.on('connection', (ws, req) => {
+  wss.on('connection', (ws) => {
     console.log('WebSocket connection established');
 
-    ws.on('message', async (message) => {
+    ws.on('message', async (data) => {
       try {
-        const data = JSON.parse(message.toString());
+        const message = JSON.parse(data.toString());
         
-        switch (data.type) {
-          case 'joinGame':
-            const gameId = data.gameId;
-            if (!gameClients.has(gameId)) {
-              gameClients.set(gameId, new Set());
-            }
-            gameClients.get(gameId)!.add(ws);
+        switch (message.type) {
+          case 'join_game':
+            const gameId = message.gameId;
+            const userId = message.userId;
             
-            ws.send(JSON.stringify({
-              type: 'gameJoined',
-              gameId
-            }));
+            if (!gameRooms.has(gameId)) {
+              gameRooms.set(gameId, new Set());
+            }
+            
+            gameRooms.get(gameId)?.add(ws);
+            userConnections.set(userId, ws);
+            
+            // Notify other players in the room
+            broadcastToGame(gameId, {
+              type: 'player_joined',
+              userId,
+            }, ws);
             break;
 
-          case 'leaveGame':
-            gameClients.forEach((clients, gameId) => {
-              clients.delete(ws);
-              if (clients.size === 0) {
-                gameClients.delete(gameId);
-              }
-            });
+          case 'game_move':
+            const moveGameId = message.gameId;
+            const playerId = message.playerId;
+            const moveType = message.moveType;
+            const moveData = message.moveData;
+            
+            // Save move to database
+            await storage.addGameMove(moveGameId, playerId, moveType, moveData);
+            
+            // Broadcast move to other players
+            broadcastToGame(moveGameId, {
+              type: 'game_move',
+              playerId,
+              moveType,
+              moveData,
+            }, ws);
             break;
 
-          default:
-            console.log('Unknown WebSocket message type:', data.type);
+          case 'leave_game':
+            const leaveGameId = message.gameId;
+            const leaveUserId = message.userId;
+            
+            gameRooms.get(leaveGameId)?.delete(ws);
+            userConnections.delete(leaveUserId);
+            
+            broadcastToGame(leaveGameId, {
+              type: 'player_left',
+              userId: leaveUserId,
+            }, ws);
+            break;
         }
       } catch (error) {
         console.error('WebSocket message error:', error);
@@ -336,16 +368,129 @@ export async function registerRoutes(app: Express): Promise<Server> {
     });
 
     ws.on('close', () => {
-      // Clean up client from all games
-      gameClients.forEach((clients, gameId) => {
-        clients.delete(ws);
-        if (clients.size === 0) {
-          gameClients.delete(gameId);
+      // Clean up connections
+      for (const [userId, connection] of userConnections.entries()) {
+        if (connection === ws) {
+          userConnections.delete(userId);
+          break;
         }
-      });
-      console.log('WebSocket connection closed');
+      }
+      
+      for (const [gameId, connections] of gameRooms.entries()) {
+        connections.delete(ws);
+        if (connections.size === 0) {
+          gameRooms.delete(gameId);
+        }
+      }
     });
   });
 
+  function broadcastToGame(gameId: number, message: any, exclude?: WebSocket) {
+    const connections = gameRooms.get(gameId);
+    if (connections) {
+      connections.forEach((connection) => {
+        if (connection !== exclude && connection.readyState === WebSocket.OPEN) {
+          connection.send(JSON.stringify(message));
+        }
+      });
+    }
+  }
+
   return httpServer;
+}
+
+async function seedInitialCards() {
+  try {
+    const existingCards = await storage.getCards();
+    if (existingCards.length > 0) {
+      return; // Cards already seeded
+    }
+
+    // Seed some initial cards from the attached CardsSpecifics
+    const initialCards = [
+      {
+        name: "Yazzilan_Industry_Zone",
+        type: ["Shipyard"],
+        attack: 0,
+        defense: 0,
+        commandCost: 0,
+        unitMembers: 0,
+        redCounters: 0,
+        blueCounters: 0,
+        specialAbility: "Provides 2 command points per turn",
+        rarity: "Uncommon",
+        imageUrl: "https://images.unsplash.com/photo-1446776877081-d282a0f896e2?ixlib=rb-4.0.3&auto=format&fit=crop&w=400&h=600"
+      },
+      {
+        name: "Terran_Shipyard",
+        type: ["Shipyard"],
+        attack: 0,
+        defense: 0,
+        commandCost: 0,
+        unitMembers: 0,
+        redCounters: 0,
+        blueCounters: 0,
+        specialAbility: "Provides 2 command points per turn",
+        rarity: "Common",
+        imageUrl: "https://images.unsplash.com/photo-1581833971358-2c8b550f87b3?ixlib=rb-4.0.3&auto=format&fit=crop&w=400&h=600"
+      },
+      {
+        name: "Aberran_Firenaute",
+        type: ["BloodThirsty", "Biological"],
+        attack: 2,
+        defense: 2,
+        commandCost: 2,
+        unitMembers: 2,
+        redCounters: 0,
+        blueCounters: 2,
+        specialAbility: "Merciless Strike - Deal extra damage when attacking damaged units",
+        rarity: "Common",
+        imageUrl: "https://images.unsplash.com/photo-1550745165-9bc0b252726f?ixlib=rb-4.0.3&auto=format&fit=crop&w=400&h=600"
+      },
+      {
+        name: "Aelgallan_Flamers",
+        type: ["Mech Quad", "Machine"],
+        attack: 3,
+        defense: 2,
+        commandCost: 6,
+        unitMembers: 3,
+        redCounters: 0,
+        blueCounters: 3,
+        specialAbility: "Kill With Fire - Destroy target unit with 1 defense",
+        rarity: "Rare",
+        imageUrl: "https://pixabay.com/get/gbb6c78a0e29d22aab83cf8a23f72a895f8479d51e9adc2227bb6af3455ba8335f4601725e6165ae80dfd754debd34534601240535363a7e88dd1c0e873dd3302_1280.jpg"
+      },
+      {
+        name: "Aneankae_Lady_of_War",
+        type: ["Dread", "Tactician", "Biological"],
+        attack: 6,
+        defense: 4,
+        commandCost: 8,
+        unitMembers: 1,
+        redCounters: 0,
+        blueCounters: 0,
+        specialAbility: "Glorious Death - When destroyed, deal 3 damage to target unit",
+        rarity: "Legendary",
+        imageUrl: "https://images.unsplash.com/photo-1502134249126-9f3755a50d78?ixlib=rb-4.0.3&auto=format&fit=crop&w=400&h=600"
+      },
+      {
+        name: "Black_Watch_BattleMech",
+        type: ["Machine"],
+        attack: 4,
+        defense: 4,
+        commandCost: 7,
+        unitMembers: 3,
+        redCounters: 0,
+        blueCounters: 3,
+        specialAbility: "No Negotiations - Cannot be targeted by enemy abilities",
+        rarity: "Rare",
+        imageUrl: "https://images.unsplash.com/photo-1506905925346-21bda4d32df4?ixlib=rb-4.0.3&auto=format&fit=crop&w=400&h=600"
+      }
+    ];
+
+    await storage.seedCards(initialCards);
+    console.log("Initial cards seeded successfully");
+  } catch (error) {
+    console.error("Error seeding initial cards:", error);
+  }
 }

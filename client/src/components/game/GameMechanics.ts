@@ -1,4 +1,4 @@
-import { cardsSpecifics } from './CardsSpecifics';
+import cardsSpecifics from './CardsSpecifics';
 
 export const Phases = {
   COMMAND: "Command Phase",
@@ -8,6 +8,9 @@ export const Phases = {
 };
 
 class GameMechanics {
+  private currentPhase: string;
+  private isPlayerTurn: boolean;
+
   constructor() {
     this.currentPhase = Phases.COMMAND;
     this.isPlayerTurn = true;
@@ -50,12 +53,11 @@ class GameMechanics {
     }
 
     if (card.type.includes("Shipyard")) {
-      return zone === "player-command-zone" || zone === "command";
+      return zone === "player-command-zone";
     } else {
-      return zone === "player-unit-zone" || zone === "player-command-zone" || zone === "unit" || zone === "command";
+      return zone === "player-unit-zone" || zone === "player-command-zone";
     }
   }
 }
 
-export { GameMechanics };
 export default GameMechanics;
