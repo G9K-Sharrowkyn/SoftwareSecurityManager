@@ -1,49 +1,70 @@
-import { useState } from "react";
-import { useQuery, useMutation, queryClient } from "@tanstack/react-query";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
+import { useEffect, useState } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest } from "@/lib/queryClient";
 import { isUnauthorizedError } from "@/lib/authUtils";
-import CardDisplay from "@/components/cards/CardDisplay";
-
-interface DeckCard {
-  cardId: number;
-  quantity: number;
-}
+import { apiRequest } from "@/lib/queryClient";
+import StarBackground from "@/components/StarBackground";
+import CardComponent from "@/components/CardComponent";
+import { Link } from "wouter";
 
 export default function DeckBuilder() {
+  const { isAuthenticated, isLoading } = useAuth();
   const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const [selectedDeck, setSelectedDeck] = useState<any>(null);
   const [deckName, setDeckName] = useState("");
-  const [currentDeck, setCurrentDeck] = useState<DeckCard[]>([]);
-  const [selectedDeckId, setSelectedDeckId] = useState<number | null>(null);
+  const [deckDescription, setDeckDescription] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
+  const [filterType, setFilterType] = useState("all");
+  const [showCreateDialog, setShowCreateDialog] = useState(false);
 
-  const { data: userCards, isLoading: cardsLoading } = useQuery({
-    queryKey: ["/api/cards/user"],
+  // Redirect to login if not authenticated
+  useEffect(() => {
+    if (!isLoading && !isAuthenticated) {
+      toast({
+        title: "Unauthorized",
+        description: "You are logged out. Logging in again...",
+        variant: "destructive",
+      });
+      setTimeout(() => {
+        window.location.href = "/api/login";
+      }, 500);
+      return;
+    }
+  }, [isAuthenticated, isLoading, toast]);
+
+  const { data: decks, error: decksError } = useQuery({
+    queryKey: ['/api/decks'],
+    enabled: isAuthenticated,
     retry: false,
   });
 
-  const { data: decks, isLoading: decksLoading } = useQuery({
-    queryKey: ["/api/decks"],
+  const { data: collection, error: collectionError } = useQuery({
+    queryKey: ['/api/collection'],
+    enabled: isAuthenticated,
     retry: false,
   });
 
   const createDeckMutation = useMutation({
-    mutationFn: async (deckData: { name: string; cards: DeckCard[] }) => {
-      const response = await apiRequest("POST", "/api/decks", deckData);
-      return response.json();
+    mutationFn: async (deckData: any) => {
+      await apiRequest('POST', '/api/decks', deckData);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/decks"] });
+      queryClient.invalidateQueries({ queryKey: ['/api/decks'] });
+      setShowCreateDialog(false);
+      setDeckName("");
+      setDeckDescription("");
       toast({
         title: "Success",
         description: "Deck created successfully!",
       });
-      setDeckName("");
-      setCurrentDeck([]);
     },
     onError: (error) => {
       if (isUnauthorizedError(error)) {
@@ -59,22 +80,18 @@ export default function DeckBuilder() {
       }
       toast({
         title: "Error",
-        description: "Failed to create deck",
+        description: "Failed to create deck. Please try again.",
         variant: "destructive",
       });
     },
   });
 
   const updateDeckMutation = useMutation({
-    mutationFn: async (data: { id: number; name: string; cards: DeckCard[] }) => {
-      const response = await apiRequest("PUT", `/api/decks/${data.id}`, {
-        name: data.name,
-        cards: data.cards
-      });
-      return response.json();
+    mutationFn: async ({ deckId, updates }: { deckId: number; updates: any }) => {
+      await apiRequest('PUT', `/api/decks/${deckId}`, updates);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/decks"] });
+      queryClient.invalidateQueries({ queryKey: ['/api/decks'] });
       toast({
         title: "Success",
         description: "Deck updated successfully!",
@@ -94,39 +111,7 @@ export default function DeckBuilder() {
       }
       toast({
         title: "Error",
-        description: "Failed to update deck",
-        variant: "destructive",
-      });
-    },
-  });
-
-  const activateDeckMutation = useMutation({
-    mutationFn: async (deckId: number) => {
-      const response = await apiRequest("POST", `/api/decks/${deckId}/activate`, {});
-      return response.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/decks"] });
-      toast({
-        title: "Success",
-        description: "Deck activated!",
-      });
-    },
-    onError: (error) => {
-      if (isUnauthorizedError(error)) {
-        toast({
-          title: "Unauthorized",
-          description: "You are logged out. Logging in again...",
-          variant: "destructive",
-        });
-        setTimeout(() => {
-          window.location.href = "/api/login";
-        }, 500);
-        return;
-      }
-      toast({
-        title: "Error",
-        description: "Failed to activate deck",
+        description: "Failed to update deck. Please try again.",
         variant: "destructive",
       });
     },
@@ -134,20 +119,15 @@ export default function DeckBuilder() {
 
   const deleteDeckMutation = useMutation({
     mutationFn: async (deckId: number) => {
-      const response = await apiRequest("DELETE", `/api/decks/${deckId}`, {});
-      return response.json();
+      await apiRequest('DELETE', `/api/decks/${deckId}`, {});
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/decks"] });
+      queryClient.invalidateQueries({ queryKey: ['/api/decks'] });
+      setSelectedDeck(null);
       toast({
         title: "Success",
-        description: "Deck deleted!",
+        description: "Deck deleted successfully!",
       });
-      if (selectedDeckId) {
-        setSelectedDeckId(null);
-        setCurrentDeck([]);
-        setDeckName("");
-      }
     },
     onError: (error) => {
       if (isUnauthorizedError(error)) {
@@ -163,116 +143,17 @@ export default function DeckBuilder() {
       }
       toast({
         title: "Error",
-        description: "Failed to delete deck",
+        description: "Failed to delete deck. Please try again.",
         variant: "destructive",
       });
     },
   });
 
-  const addCardToDeck = (cardId: number) => {
-    const existingCard = currentDeck.find(c => c.cardId === cardId);
-    const userCard = userCards?.find((uc: any) => uc.cardId === cardId);
-    
-    if (!userCard) return;
-    
-    if (existingCard) {
-      if (existingCard.quantity < userCard.quantity && existingCard.quantity < 3) {
-        setCurrentDeck(currentDeck.map(c => 
-          c.cardId === cardId ? { ...c, quantity: c.quantity + 1 } : c
-        ));
-      }
-    } else {
-      if (currentDeck.length < 60) {
-        setCurrentDeck([...currentDeck, { cardId, quantity: 1 }]);
-      }
-    }
-  };
-
-  const removeCardFromDeck = (cardId: number) => {
-    const existingCard = currentDeck.find(c => c.cardId === cardId);
-    if (existingCard) {
-      if (existingCard.quantity > 1) {
-        setCurrentDeck(currentDeck.map(c => 
-          c.cardId === cardId ? { ...c, quantity: c.quantity - 1 } : c
-        ));
-      } else {
-        setCurrentDeck(currentDeck.filter(c => c.cardId !== cardId));
-      }
-    }
-  };
-
-  const loadDeck = (deck: any) => {
-    setSelectedDeckId(deck.id);
-    setDeckName(deck.name);
-    setCurrentDeck(deck.cards || []);
-  };
-
-  const saveDeck = () => {
-    if (!deckName.trim()) {
-      toast({
-        title: "Error",
-        description: "Please enter a deck name",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    if (currentDeck.length === 0) {
-      toast({
-        title: "Error",
-        description: "Deck must contain at least one card",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    if (selectedDeckId) {
-      updateDeckMutation.mutate({
-        id: selectedDeckId,
-        name: deckName,
-        cards: currentDeck
-      });
-    } else {
-      createDeckMutation.mutate({
-        name: deckName,
-        cards: currentDeck
-      });
-    }
-  };
-
-  const newDeck = () => {
-    setSelectedDeckId(null);
-    setDeckName("");
-    setCurrentDeck([]);
-  };
-
-  const filteredCards = userCards?.filter((userCard: any) => 
-    userCard.card.name.toLowerCase().includes(searchTerm.toLowerCase())
-  ) || [];
-
-  const totalCards = currentDeck.reduce((sum, card) => sum + card.quantity, 0);
-  const deckStats = currentDeck.reduce((stats, deckCard) => {
-    const userCard = userCards?.find((uc: any) => uc.cardId === deckCard.cardId);
-    if (userCard?.card) {
-      const card = userCard.card;
-      if (card.type.includes("Shipyard")) {
-        stats.shipyards += deckCard.quantity;
-      } else if (card.type.includes("Unit")) {
-        stats.units += deckCard.quantity;
-      } else {
-        stats.commands += deckCard.quantity;
-      }
-      stats.totalCost += (card.commandCost || 0) * deckCard.quantity;
-    }
-    return stats;
-  }, { units: 0, commands: 0, shipyards: 0, totalCost: 0 });
-
-  const averageCost = totalCards > 0 ? (deckStats.totalCost / totalCards).toFixed(1) : "0";
-
-  if (cardsLoading || decksLoading) {
+  if (isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center pt-24">
-        <div className="text-cosmic-gold text-xl">
+      <div className="min-h-screen bg-cosmic-black flex items-center justify-center">
+        <StarBackground />
+        <div className="relative z-10 text-cosmic-gold text-xl">
           <i className="fas fa-spinner fa-spin mr-2"></i>
           Loading deck builder...
         </div>
@@ -280,255 +161,341 @@ export default function DeckBuilder() {
     );
   }
 
+  if (decksError || collectionError) {
+    const error = decksError || collectionError;
+    if (error instanceof Error && isUnauthorizedError(error)) {
+      toast({
+        title: "Unauthorized",
+        description: "You are logged out. Logging in again...",
+        variant: "destructive",
+      });
+      setTimeout(() => {
+        window.location.href = "/api/login";
+      }, 500);
+      return null;
+    }
+  }
+
+  const handleCreateDeck = () => {
+    if (!deckName.trim()) {
+      toast({
+        title: "Error",
+        description: "Please enter a deck name.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    createDeckMutation.mutate({
+      name: deckName,
+      description: deckDescription,
+      cardData: [],
+    });
+  };
+
+  const handleAddCardToDeck = (card: any) => {
+    if (!selectedDeck) {
+      toast({
+        title: "Error",
+        description: "Please select a deck first.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const currentCards = selectedDeck.cardData || [];
+    const existingCard = currentCards.find((c: any) => c.cardId === card.id);
+    const newCardData = existingCard
+      ? currentCards.map((c: any) => 
+          c.cardId === card.id 
+            ? { ...c, quantity: Math.min(c.quantity + 1, 4) } 
+            : c
+        )
+      : [...currentCards, { cardId: card.id, quantity: 1 }];
+
+    // Check deck size limit
+    const totalCards = newCardData.reduce((sum: number, c: any) => sum + c.quantity, 0);
+    if (totalCards > 60) {
+      toast({
+        title: "Error",
+        description: "Deck cannot exceed 60 cards.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    updateDeckMutation.mutate({
+      deckId: selectedDeck.id,
+      updates: { cardData: newCardData }
+    });
+
+    setSelectedDeck({ ...selectedDeck, cardData: newCardData });
+  };
+
+  const handleRemoveCardFromDeck = (cardId: number) => {
+    if (!selectedDeck) return;
+
+    const currentCards = selectedDeck.cardData || [];
+    const newCardData = currentCards
+      .map((c: any) => 
+        c.cardId === cardId 
+          ? { ...c, quantity: c.quantity - 1 } 
+          : c
+      )
+      .filter((c: any) => c.quantity > 0);
+
+    updateDeckMutation.mutate({
+      deckId: selectedDeck.id,
+      updates: { cardData: newCardData }
+    });
+
+    setSelectedDeck({ ...selectedDeck, cardData: newCardData });
+  };
+
+  const filteredCollection = collection?.filter((item: any) => {
+    const matchesSearch = item.card.name.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesType = filterType === "all" || item.card.type.toLowerCase() === filterType.toLowerCase();
+    return matchesSearch && matchesType;
+  }) || [];
+
+  const getDeckCardCount = () => {
+    if (!selectedDeck?.cardData) return 0;
+    return selectedDeck.cardData.reduce((sum: number, c: any) => sum + c.quantity, 0);
+  };
+
+  const getCardInDeck = (cardId: number) => {
+    if (!selectedDeck?.cardData) return 0;
+    const card = selectedDeck.cardData.find((c: any) => c.cardId === cardId);
+    return card ? card.quantity : 0;
+  };
+
   return (
-    <div className="container mx-auto px-4 py-8 pt-24">
-      <div className="mb-8">
-        <h1 className="text-4xl font-bold text-cosmic-gold mb-4">
-          <i className="fas fa-hammer mr-3"></i>
-          Deck Builder
-        </h1>
-        <p className="text-cosmic-silver">
-          Create and manage your battle decks. Combine cards strategically to dominate the battlefield.
-        </p>
-      </div>
+    <div className="min-h-screen relative overflow-hidden bg-cosmic-black text-cosmic-silver">
+      <StarBackground />
+      
+      {/* Navigation Header */}
+      <nav className="relative z-50 bg-cosmic-blue/90 backdrop-blur-md border-b border-cosmic-gold/30">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex justify-between items-center h-16">
+            <div className="flex items-center space-x-4">
+              <Link href="/" className="flex items-center space-x-2">
+                <i className="fas fa-rocket text-cosmic-gold text-2xl"></i>
+                <span className="text-xl font-bold text-cosmic-gold">Proteus Nebula</span>
+              </Link>
+            </div>
+            
+            <div className="flex items-center space-x-6">
+              <Link href="/" className="text-cosmic-silver hover:text-cosmic-gold transition-colors duration-200 font-medium">
+                <i className="fas fa-home mr-2"></i>Dashboard
+              </Link>
+              <Link href="/collection" className="text-cosmic-silver hover:text-cosmic-gold transition-colors duration-200 font-medium">
+                <i className="fas fa-layer-group mr-2"></i>Collection
+              </Link>
+              <Link href="/deck-builder" className="text-cosmic-gold font-medium">
+                <i className="fas fa-cogs mr-2"></i>Deck Builder
+              </Link>
+            </div>
+          </div>
+        </div>
+      </nav>
 
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
-        {/* Card Collection */}
-        <div className="lg:col-span-3 space-y-6">
-          {/* Search */}
-          <Card className="bg-cosmic-800/50 backdrop-blur-sm border-cosmic-600">
-            <CardContent className="p-4">
-              <Input
-                type="text"
-                placeholder="Search your cards..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="bg-cosmic-700 border-cosmic-600 text-cosmic-silver"
-              />
-            </CardContent>
-          </Card>
+      {/* Main Content */}
+      <main className="relative z-10 h-screen flex overflow-hidden">
+        {/* Deck List Sidebar */}
+        <div className="w-1/4 bg-cosmic-blue/20 border-r border-cosmic-gold/30 p-4 overflow-y-auto">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-xl font-bold text-cosmic-gold">Your Decks</h2>
+            <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
+              <DialogTrigger asChild>
+                <Button size="sm" className="bg-cosmic-gold hover:bg-cosmic-gold/80 text-cosmic-black">
+                  <i className="fas fa-plus mr-1"></i>New
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="bg-cosmic-blue border-cosmic-gold/30">
+                <DialogHeader>
+                  <DialogTitle className="text-cosmic-gold">Create New Deck</DialogTitle>
+                  <DialogDescription className="text-cosmic-silver/80">
+                    Enter a name and description for your new deck.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-4">
+                  <Input
+                    placeholder="Deck name"
+                    value={deckName}
+                    onChange={(e) => setDeckName(e.target.value)}
+                    className="bg-cosmic-black/50 border-cosmic-gold/30 text-cosmic-silver"
+                  />
+                  <Textarea
+                    placeholder="Deck description (optional)"
+                    value={deckDescription}
+                    onChange={(e) => setDeckDescription(e.target.value)}
+                    className="bg-cosmic-black/50 border-cosmic-gold/30 text-cosmic-silver"
+                  />
+                  <div className="flex justify-end space-x-2">
+                    <Button 
+                      variant="outline" 
+                      onClick={() => setShowCreateDialog(false)}
+                      className="border-cosmic-gold/50 text-cosmic-gold hover:bg-cosmic-gold hover:text-cosmic-black"
+                    >
+                      Cancel
+                    </Button>
+                    <Button 
+                      onClick={handleCreateDeck}
+                      disabled={createDeckMutation.isPending}
+                      className="bg-cosmic-gold hover:bg-cosmic-gold/80 text-cosmic-black"
+                    >
+                      {createDeckMutation.isPending ? 'Creating...' : 'Create Deck'}
+                    </Button>
+                  </div>
+                </div>
+              </DialogContent>
+            </Dialog>
+          </div>
 
-          {/* Card Grid */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-            {filteredCards.map((userCard: any) => {
-              const inDeck = currentDeck.find(c => c.cardId === userCard.cardId);
-              const canAdd = !inDeck || (inDeck.quantity < userCard.quantity && inDeck.quantity < 3);
-              
-              return (
-                <div key={userCard.id} className="relative">
-                  <div className={`cursor-pointer transition-all duration-200 ${
-                    canAdd ? "hover:scale-105" : "opacity-50"
-                  }`}>
-                    <CardDisplay card={userCard.card} />
-                    {canAdd && (
+          <div className="space-y-2">
+            {decks?.map((deck: any) => (
+              <Card
+                key={deck.id}
+                className={`cursor-pointer transition-all duration-200 ${
+                  selectedDeck?.id === deck.id
+                    ? 'bg-cosmic-gold/20 border-cosmic-gold'
+                    : 'bg-cosmic-blue/10 border-cosmic-gold/30 hover:border-cosmic-gold/50'
+                }`}
+                onClick={() => setSelectedDeck(deck)}
+              >
+                <CardContent className="p-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="font-semibold text-cosmic-gold">{deck.name}</h3>
+                      <p className="text-xs text-cosmic-silver/70">
+                        {deck.cardData?.reduce((sum: number, c: any) => sum + c.quantity, 0) || 0} cards
+                      </p>
+                    </div>
+                    {selectedDeck?.id === deck.id && (
                       <Button
-                        onClick={() => addCardToDeck(userCard.cardId)}
-                        className="absolute bottom-2 left-2 right-2 bg-cosmic-gold text-cosmic-900 text-sm"
                         size="sm"
+                        variant="destructive"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          deleteDeckMutation.mutate(deck.id);
+                        }}
                       >
-                        <i className="fas fa-plus mr-1"></i>
-                        Add
+                        <i className="fas fa-trash"></i>
                       </Button>
                     )}
                   </div>
-                  <div className="absolute top-2 right-2 flex space-x-1">
-                    <Badge className="bg-cosmic-gold text-cosmic-900">
-                      {userCard.quantity}
-                    </Badge>
-                    {inDeck && (
-                      <Badge className="bg-green-600 text-white">
-                        {inDeck.quantity}
-                      </Badge>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
+                </CardContent>
+              </Card>
+            ))}
           </div>
         </div>
 
-        {/* Deck Management Sidebar */}
-        <div className="space-y-6">
-          {/* Deck Info */}
-          <Card className="bg-cosmic-800/50 backdrop-blur-sm border-cosmic-gold/30">
-            <CardHeader>
-              <CardTitle className="text-cosmic-gold flex items-center">
-                <i className="fas fa-layer-group mr-2"></i>
-                Current Deck
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
+        {/* Collection Browser */}
+        <div className="w-1/2 p-4 overflow-y-auto">
+          <div className="mb-4">
+            <h2 className="text-xl font-bold text-cosmic-gold mb-4">Card Collection</h2>
+            
+            <div className="flex gap-4 mb-4">
               <Input
-                type="text"
-                placeholder="Deck name..."
-                value={deckName}
-                onChange={(e) => setDeckName(e.target.value)}
-                className="bg-cosmic-700 border-cosmic-600 text-cosmic-silver"
+                placeholder="Search cards..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="bg-cosmic-black/50 border-cosmic-gold/30 text-cosmic-silver"
               />
-              
-              <div className="text-center space-y-2">
-                <div className="text-2xl font-bold text-cosmic-gold">
-                  {totalCards}/60
-                </div>
-                <div className="text-cosmic-silver text-sm">Cards</div>
-              </div>
+              <Select value={filterType} onValueChange={setFilterType}>
+                <SelectTrigger className="w-48 bg-cosmic-black/50 border-cosmic-gold/30 text-cosmic-silver">
+                  <SelectValue placeholder="Filter by type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Types</SelectItem>
+                  <SelectItem value="unit">Units</SelectItem>
+                  <SelectItem value="command">Commands</SelectItem>
+                  <SelectItem value="shipyard">Shipyards</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
 
-              <div className="space-y-2 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-cosmic-silver">Units:</span>
-                  <span className="text-cosmic-gold">{deckStats.units}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-cosmic-silver">Commands:</span>
-                  <span className="text-cosmic-gold">{deckStats.commands}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-cosmic-silver">Shipyards:</span>
-                  <span className="text-cosmic-gold">{deckStats.shipyards}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-cosmic-silver">Avg. Cost:</span>
-                  <span className="text-cosmic-gold">{averageCost}</span>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Button
-                  onClick={saveDeck}
-                  disabled={createDeckMutation.isPending || updateDeckMutation.isPending}
-                  className="w-full bg-cosmic-gold text-cosmic-900"
+          <div className="grid grid-cols-3 gap-4">
+            {filteredCollection.map((item: any) => (
+              <div key={`${item.cardId}-${item.playerId}`} className="relative">
+                <div 
+                  className="cursor-pointer transform hover:scale-105 transition-transform duration-200"
+                  onClick={() => handleAddCardToDeck(item.card)}
                 >
-                  {createDeckMutation.isPending || updateDeckMutation.isPending ? (
-                    <>
-                      <i className="fas fa-spinner fa-spin mr-2"></i>
-                      Saving...
-                    </>
-                  ) : (
-                    <>
-                      <i className="fas fa-save mr-2"></i>
-                      {selectedDeckId ? "Update Deck" : "Save Deck"}
-                    </>
-                  )}
-                </Button>
-                
-                <Button
-                  onClick={newDeck}
-                  variant="outline"
-                  className="w-full border-cosmic-gold/30 text-cosmic-silver hover:bg-cosmic-gold/20"
-                >
-                  <i className="fas fa-plus mr-2"></i>
-                  New Deck
-                </Button>
+                  <CardComponent card={item.card} />
+                </div>
+                <div className="absolute top-2 left-2 bg-cosmic-black/80 text-cosmic-silver text-xs px-2 py-1 rounded">
+                  Own: {item.quantity}
+                </div>
+                {getCardInDeck(item.card.id) > 0 && (
+                  <div className="absolute top-2 right-2 bg-cosmic-gold text-cosmic-black text-xs px-2 py-1 rounded font-bold">
+                    In Deck: {getCardInDeck(item.card.id)}
+                  </div>
+                )}
               </div>
-            </CardContent>
-          </Card>
+            ))}
+          </div>
+        </div>
 
-          {/* Current Deck Cards */}
-          <Card className="bg-cosmic-800/50 backdrop-blur-sm border-cosmic-600">
-            <CardHeader>
-              <CardTitle className="text-cosmic-silver">Deck Cards</CardTitle>
-            </CardHeader>
-            <CardContent className="max-h-80 overflow-y-auto space-y-2">
-              {currentDeck.map((deckCard) => {
-                const userCard = userCards?.find((uc: any) => uc.cardId === deckCard.cardId);
-                if (!userCard) return null;
-                
+        {/* Current Deck */}
+        <div className="w-1/4 bg-cosmic-blue/20 border-l border-cosmic-gold/30 p-4 overflow-y-auto">
+          <div className="mb-4">
+            <h2 className="text-xl font-bold text-cosmic-gold">
+              {selectedDeck ? selectedDeck.name : 'Select a Deck'}
+            </h2>
+            {selectedDeck && (
+              <p className="text-cosmic-silver/70 text-sm">
+                Cards: {getDeckCardCount()}/60
+              </p>
+            )}
+          </div>
+
+          {selectedDeck ? (
+            <div className="space-y-2">
+              {selectedDeck.cardData?.map((deckCard: any) => {
+                const collectionItem = collection?.find((item: any) => item.card.id === deckCard.cardId);
+                if (!collectionItem) return null;
+
                 return (
-                  <div key={deckCard.cardId} className="flex items-center justify-between p-2 bg-cosmic-700/30 rounded">
-                    <div className="flex items-center space-x-2">
-                      <div className="w-8 h-12 bg-cosmic-600 rounded flex-shrink-0"></div>
-                      <div>
-                        <div className="text-cosmic-silver text-sm font-medium">
-                          {userCard.card.name}
+                  <Card key={deckCard.cardId} className="bg-cosmic-blue/10 border-cosmic-gold/30">
+                    <CardContent className="p-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex-1">
+                          <div className="text-cosmic-gold font-medium text-sm">
+                            {collectionItem.card.name}
+                          </div>
+                          <div className="text-cosmic-silver/70 text-xs">
+                            {collectionItem.card.type} • Cost: {collectionItem.card.cost}
+                          </div>
                         </div>
-                        <div className="text-cosmic-silver/70 text-xs">
-                          Cost: {userCard.card.commandCost || 0}
+                        <div className="flex items-center space-x-2">
+                          <span className="text-cosmic-gold font-bold">
+                            {deckCard.quantity}x
+                          </span>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleRemoveCardFromDeck(deckCard.cardId)}
+                            className="h-6 w-6 p-0 border-red-500/50 text-red-400 hover:bg-red-500 hover:text-white"
+                          >
+                            <i className="fas fa-minus text-xs"></i>
+                          </Button>
                         </div>
                       </div>
-                    </div>
-                    <div className="flex items-center space-x-2">
-                      <span className="text-cosmic-gold text-sm">{deckCard.quantity}x</span>
-                      <Button
-                        onClick={() => removeCardFromDeck(deckCard.cardId)}
-                        size="sm"
-                        variant="destructive"
-                        className="h-6 w-6 p-0"
-                      >
-                        <i className="fas fa-minus text-xs"></i>
-                      </Button>
-                    </div>
-                  </div>
+                    </CardContent>
+                  </Card>
                 );
               })}
-              
-              {currentDeck.length === 0 && (
-                <div className="text-center py-8 text-cosmic-silver/70">
-                  <i className="fas fa-layer-group text-2xl mb-2"></i>
-                  <p>No cards in deck</p>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Saved Decks */}
-          <Card className="bg-cosmic-800/50 backdrop-blur-sm border-cosmic-600">
-            <CardHeader>
-              <CardTitle className="text-cosmic-silver">Saved Decks</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              {decks?.map((deck: any) => (
-                <div key={deck.id} className="flex items-center justify-between p-2 bg-cosmic-700/30 rounded">
-                  <div className="flex-1">
-                    <div className="text-cosmic-silver text-sm font-medium">
-                      {deck.name}
-                      {deck.isActive && (
-                        <Badge className="ml-2 bg-green-600 text-white text-xs">Active</Badge>
-                      )}
-                    </div>
-                    <div className="text-cosmic-silver/70 text-xs">
-                      {deck.cards?.reduce((sum: number, c: any) => sum + c.quantity, 0) || 0} cards
-                    </div>
-                  </div>
-                  <div className="flex space-x-1">
-                    <Button
-                      onClick={() => loadDeck(deck)}
-                      size="sm"
-                      variant="outline"
-                      className="h-6 px-2 border-cosmic-gold/30 text-cosmic-silver hover:bg-cosmic-gold/20"
-                    >
-                      <i className="fas fa-edit text-xs"></i>
-                    </Button>
-                    {!deck.isActive && (
-                      <Button
-                        onClick={() => activateDeckMutation.mutate(deck.id)}
-                        size="sm"
-                        className="h-6 px-2 bg-green-600 hover:bg-green-700"
-                      >
-                        <i className="fas fa-check text-xs"></i>
-                      </Button>
-                    )}
-                    <Button
-                      onClick={() => deleteDeckMutation.mutate(deck.id)}
-                      size="sm"
-                      variant="destructive"
-                      className="h-6 px-2"
-                    >
-                      <i className="fas fa-trash text-xs"></i>
-                    </Button>
-                  </div>
-                </div>
-              ))}
-              
-              {(!decks || decks.length === 0) && (
-                <div className="text-center py-4 text-cosmic-silver/70">
-                  <i className="fas fa-layer-group text-xl mb-2"></i>
-                  <p className="text-sm">No saved decks</p>
-                </div>
-              )}
-            </CardContent>
-          </Card>
+            </div>
+          ) : (
+            <div className="text-center text-cosmic-silver/70 mt-8">
+              <i className="fas fa-layer-group text-4xl mb-4"></i>
+              <p>Select a deck to start building</p>
+            </div>
+          )}
         </div>
-      </div>
+      </main>
     </div>
   );
 }

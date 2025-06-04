@@ -1,27 +1,26 @@
 import { useEffect, useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import { isUnauthorizedError } from "@/lib/authUtils";
-import { apiRequest } from "@/lib/queryClient";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import Navigation from "@/components/layout/navigation";
-import BoosterPackModal from "@/components/game/BoosterPackModal";
+import { apiRequest, queryClient } from "@/lib/queryClient";
+import StarBackground from "@/components/ui/star-background";
+import Navigation from "@/components/ui/navigation";
+import BoosterPack from "@/components/ui/booster-pack";
 
 export default function Collection() {
-  const { isAuthenticated, isLoading } = useAuth();
+  const { user, isLoading } = useAuth();
   const { toast } = useToast();
-  const queryClient = useQueryClient();
   const [searchTerm, setSearchTerm] = useState("");
-  const [filterType, setFilterType] = useState("all");
-  const [showBoosterModal, setShowBoosterModal] = useState(false);
+  const [selectedRarity, setSelectedRarity] = useState("all");
 
-  // Redirect if not authenticated
+  // Redirect to login if not authenticated
   useEffect(() => {
-    if (!isLoading && !isAuthenticated) {
+    if (!isLoading && !user) {
       toast({
         title: "Unauthorized",
         description: "You are logged out. Logging in again...",
@@ -32,40 +31,29 @@ export default function Collection() {
       }, 500);
       return;
     }
-  }, [isAuthenticated, isLoading, toast]);
+  }, [user, isLoading, toast]);
 
-  // Fetch user's collection
-  const { data: userCards, isLoading: cardsLoading } = useQuery({
+  const { data: collection } = useQuery({
     queryKey: ["/api/collection"],
-    enabled: isAuthenticated,
     retry: false,
   });
 
-  // Fetch user's decks
-  const { data: userDecks } = useQuery({
-    queryKey: ["/api/decks"],
-    enabled: isAuthenticated,
-    retry: false,
-  });
-
-  // Fetch booster packs
   const { data: boosterPacks } = useQuery({
     queryKey: ["/api/booster-packs"],
-    enabled: isAuthenticated,
     retry: false,
   });
 
-  // Create deck mutation
-  const createDeckMutation = useMutation({
-    mutationFn: async (deckData: { name: string; cardData: any[] }) => {
-      const response = await apiRequest("POST", "/api/decks", deckData);
+  const buyBoosterMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest("POST", "/api/booster-packs/buy");
       return response.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/decks"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/booster-packs"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
       toast({
         title: "Success",
-        description: "Deck created successfully!",
+        description: "Booster pack purchased!",
       });
     },
     onError: (error) => {
@@ -82,248 +70,236 @@ export default function Collection() {
       }
       toast({
         title: "Error",
-        description: "Failed to create deck",
+        description: "Failed to purchase booster pack",
         variant: "destructive",
       });
     },
   });
 
-  if (isLoading || cardsLoading) {
+  const openBoosterMutation = useMutation({
+    mutationFn: async (packId: number) => {
+      const response = await apiRequest("POST", `/api/booster-packs/${packId}/open`);
+      return response.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/collection"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/booster-packs"] });
+      toast({
+        title: "Pack Opened!",
+        description: `You received ${data.cards.length} new cards!`,
+      });
+    },
+    onError: (error) => {
+      if (isUnauthorizedError(error)) {
+        toast({
+          title: "Unauthorized",
+          description: "You are logged out. Logging in again...",
+          variant: "destructive",
+        });
+        setTimeout(() => {
+          window.location.href = "/api/login";
+        }, 500);
+        return;
+      }
+      toast({
+        title: "Error",
+        description: "Failed to open booster pack",
+        variant: "destructive",
+      });
+    },
+  });
+
+  if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <div className="text-cosmic-gold text-xl">Loading collection...</div>
+        <div className="text-cosmic-gold">Loading...</div>
       </div>
     );
   }
 
-  if (!isAuthenticated) {
+  if (!user) {
     return null;
   }
 
-  // Filter cards based on search and type
-  const filteredCards = userCards?.filter((userCard: any) => {
-    const card = userCard.card;
-    const matchesSearch = card.name.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesType = filterType === "all" || 
-      (filterType === "units" && !card.type.includes("Shipyard")) ||
-      (filterType === "shipyards" && card.type.includes("Shipyard"));
-    return matchesSearch && matchesType;
-  }) || [];
+  const userCards = collection || [];
+  const unopenedPacks = boosterPacks?.filter((pack: any) => !pack.opened) || [];
 
-  const availablePacks = boosterPacks?.filter((pack: any) => !pack.isOpened) || [];
+  const filteredCards = userCards.filter((userCard: any) => {
+    const matchesSearch = userCard.card.name.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesRarity = selectedRarity === "all" || userCard.card.rarity === selectedRarity;
+    return matchesSearch && matchesRarity;
+  });
 
-  const createStarterDeck = () => {
-    if (!userCards || userCards.length < 10) {
-      toast({
-        title: "Not enough cards",
-        description: "You need at least 10 cards to create a deck",
-        variant: "destructive",
-      });
-      return;
+  const getRarityColor = (rarity: string) => {
+    switch (rarity) {
+      case "legendary": return "text-yellow-400";
+      case "rare": return "text-purple-400";
+      case "uncommon": return "text-blue-400";
+      default: return "text-gray-400";
     }
+  };
 
-    const deckCards = userCards.slice(0, Math.min(20, userCards.length)).map((userCard: any) => ({
-      cardId: userCard.cardId,
-      quantity: Math.min(userCard.quantity, 3)
-    }));
-
-    createDeckMutation.mutate({
-      name: `Deck ${(userDecks?.length || 0) + 1}`,
-      cardData: deckCards,
-    });
+  const getRarityBg = (rarity: string) => {
+    switch (rarity) {
+      case "legendary": return "from-yellow-600 to-yellow-800";
+      case "rare": return "from-purple-600 to-purple-800";
+      case "uncommon": return "from-blue-600 to-blue-800";
+      default: return "from-gray-600 to-gray-800";
+    }
   };
 
   return (
-    <div className="min-h-screen relative z-10">
+    <div className="min-h-screen relative">
+      <StarBackground />
       <Navigation />
       
-      <main className="max-w-7xl mx-auto px-4 py-6">
-        {/* Header */}
-        <div className="text-center mb-8">
-          <h1 className="text-4xl font-bold text-cosmic-gold mb-4">Your Collection</h1>
-          <p className="text-cosmic-silver">
-            Manage your cards and build powerful decks
-          </p>
-        </div>
-
-        {/* Stats and Actions */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-          <Card className="bg-cosmic-800/50 border-cosmic-600">
-            <CardHeader>
-              <CardTitle className="text-cosmic-gold">Collection Stats</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-2">
-                <div className="flex justify-between">
-                  <span className="text-cosmic-silver">Total Cards:</span>
-                  <span className="text-cosmic-gold font-bold">{userCards?.length || 0}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-cosmic-silver">Unique Cards:</span>
-                  <span className="text-cosmic-gold font-bold">
-                    {new Set(userCards?.map((uc: any) => uc.cardId)).size || 0}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-cosmic-silver">Decks Built:</span>
-                  <span className="text-cosmic-gold font-bold">{userDecks?.length || 0}</span>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="bg-cosmic-800/50 border-cosmic-600">
-            <CardHeader>
-              <CardTitle className="text-cosmic-gold">Booster Packs</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                <div className="text-center">
-                  <div className="text-2xl font-bold text-cosmic-gold">{availablePacks.length}</div>
-                  <div className="text-cosmic-silver">Available Packs</div>
-                </div>
-                <Button 
-                  onClick={() => setShowBoosterModal(true)}
-                  disabled={availablePacks.length === 0}
-                  className="w-full bg-purple-600 hover:bg-purple-700 text-white"
-                >
-                  <i className="fas fa-gift mr-2"></i>
-                  Open Pack
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="bg-cosmic-800/50 border-cosmic-600">
-            <CardHeader>
-              <CardTitle className="text-cosmic-gold">Quick Actions</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-3">
-                <Button 
-                  onClick={createStarterDeck}
-                  disabled={createDeckMutation.isPending || !userCards || userCards.length < 10}
-                  className="w-full bg-cosmic-gold hover:bg-cosmic-gold/80 text-cosmic-900"
-                >
-                  <i className="fas fa-plus mr-2"></i>
-                  Create Deck
-                </Button>
-                <Button 
-                  variant="outline"
-                  className="w-full border-cosmic-gold text-cosmic-gold hover:bg-cosmic-gold hover:text-cosmic-900"
-                >
-                  <i className="fas fa-download mr-2"></i>
-                  Export Collection
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Filters */}
-        <div className="flex flex-col md:flex-row gap-4 mb-6">
-          <Input
-            placeholder="Search cards..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="bg-cosmic-700 border-cosmic-600 text-cosmic-silver placeholder:text-cosmic-silver/50"
-          />
-          <Select value={filterType} onValueChange={setFilterType}>
-            <SelectTrigger className="bg-cosmic-700 border-cosmic-600 text-cosmic-silver md:w-48">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Cards</SelectItem>
-              <SelectItem value="units">Units</SelectItem>
-              <SelectItem value="shipyards">Shipyards</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-
-        {/* Card Grid */}
-        {filteredCards.length === 0 ? (
-          <div className="text-center py-12">
-            <div className="text-cosmic-silver text-lg mb-4">
-              {userCards?.length === 0 ? "No cards in your collection yet" : "No cards match your filters"}
-            </div>
-            {userCards?.length === 0 && (
-              <Button 
-                onClick={() => setShowBoosterModal(true)}
-                className="bg-purple-600 hover:bg-purple-700 text-white"
-              >
-                <i className="fas fa-gift mr-2"></i>
-                Open Your First Pack
-              </Button>
-            )}
+      <main className="relative z-10 container mx-auto px-4 py-8">
+        <div className="flex items-center justify-between mb-8">
+          <h1 className="text-4xl font-bold text-cosmic-gold animate-glow">
+            Card Collection
+          </h1>
+          <div className="flex items-center space-x-2 bg-cosmic-blue/30 rounded-lg px-4 py-2">
+            <i className="fas fa-coins text-yellow-400"></i>
+            <span className="font-semibold text-yellow-400">{user.credits}</span>
           </div>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-            {filteredCards.map((userCard: any) => (
-              <Card key={`${userCard.cardId}-${userCard.id}`} className="bg-cosmic-800/50 border-cosmic-600 hover:border-cosmic-gold transition-all duration-300 cursor-pointer">
-                <CardContent className="p-4">
-                  <div className="aspect-[3/4] bg-gradient-to-br from-cosmic-blue to-cosmic-700 rounded-lg mb-3 flex items-center justify-center relative overflow-hidden">
-                    {userCard.card.imageUrl ? (
-                      <img 
-                        src={userCard.card.imageUrl} 
-                        alt={userCard.card.name}
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      <div className="text-cosmic-gold text-4xl">
-                        <i className={userCard.card.type.includes("Shipyard") ? "fas fa-industry" : "fas fa-rocket"}></i>
-                      </div>
-                    )}
-                    
-                    {/* Card stats overlay */}
-                    <div className="absolute top-2 left-2 right-2 bg-black/80 rounded text-xs text-center">
-                      <div className="text-cosmic-gold font-semibold truncate">{userCard.card.name}</div>
-                    </div>
-                    
-                    {!userCard.card.type.includes("Shipyard") && (
-                      <div className="absolute bottom-2 left-2 right-2 bg-black/80 rounded text-xs">
-                        <div className="flex justify-between items-center text-white px-1">
-                          <span className="text-red-400">{userCard.card.attack}</span>
-                          <span className="text-amber-400">{userCard.card.commandCost}</span>
-                          <span className="text-blue-400">{userCard.card.defense}</span>
-                        </div>
-                      </div>
-                    )}
+        </div>
 
-                    {/* Quantity badge */}
-                    <div className="absolute top-2 right-2 bg-cosmic-gold text-cosmic-900 rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold">
-                      {userCard.quantity}
-                    </div>
+        {/* Booster Packs Section */}
+        {unopenedPacks.length > 0 && (
+          <Card className="bg-cosmic-blue/30 border-cosmic-gold/30 mb-8">
+            <CardHeader>
+              <CardTitle className="text-cosmic-gold">
+                <i className="fas fa-gift mr-2"></i>
+                Unopened Booster Packs ({unopenedPacks.length})
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="flex flex-wrap gap-4">
+                {unopenedPacks.map((pack: any) => (
+                  <BoosterPack
+                    key={pack.id}
+                    pack={pack}
+                    onOpen={() => openBoosterMutation.mutate(pack.id)}
+                    isOpening={openBoosterMutation.isPending}
+                  />
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Buy Booster Pack */}
+        <Card className="bg-cosmic-blue/30 border-cosmic-gold/30 mb-8">
+          <CardHeader>
+            <CardTitle className="text-cosmic-gold">
+              <i className="fas fa-shopping-cart mr-2"></i>
+              Shop
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="font-semibold">Standard Booster Pack</h3>
+                <p className="text-sm text-foreground/70">Contains 5 random cards</p>
+              </div>
+              <Button 
+                onClick={() => buyBoosterMutation.mutate()}
+                disabled={buyBoosterMutation.isPending || user.credits < 100}
+                className="bg-cosmic-gold hover:bg-cosmic-gold/80 text-space-black"
+              >
+                Buy for 100 <i className="fas fa-coins ml-1"></i>
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Collection Filters */}
+        <Card className="bg-cosmic-blue/30 border-cosmic-gold/30 mb-8">
+          <CardContent className="p-6">
+            <div className="flex flex-wrap gap-4 items-center">
+              <div className="flex-1 min-w-64">
+                <Input
+                  placeholder="Search cards..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="bg-space-black/30 border-cosmic-gold/30"
+                />
+              </div>
+              
+              <div className="flex gap-2">
+                {["all", "common", "uncommon", "rare", "legendary"].map((rarity) => (
+                  <Button
+                    key={rarity}
+                    variant={selectedRarity === rarity ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setSelectedRarity(rarity)}
+                    className={selectedRarity === rarity 
+                      ? "bg-cosmic-gold text-space-black" 
+                      : "border-cosmic-gold/30 text-cosmic-gold hover:bg-cosmic-gold hover:text-space-black"
+                    }
+                  >
+                    {rarity.charAt(0).toUpperCase() + rarity.slice(1)}
+                  </Button>
+                ))}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Collection Grid */}
+        {filteredCards.length === 0 ? (
+          <Card className="bg-cosmic-blue/30 border-cosmic-gold/30">
+            <CardContent className="p-12 text-center">
+              <i className="fas fa-layer-group text-6xl text-cosmic-gold/30 mb-4"></i>
+              <h3 className="text-xl font-semibold text-cosmic-gold mb-2">No Cards Found</h3>
+              <p className="text-foreground/70">
+                {searchTerm || selectedRarity !== "all" 
+                  ? "Try adjusting your search or filters."
+                  : "Start by opening booster packs to build your collection!"
+                }
+              </p>
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-4">
+            {filteredCards.map((userCard: any) => (
+              <Card 
+                key={`${userCard.cardId}-${userCard.userId}`}
+                className={`bg-gradient-to-br ${getRarityBg(userCard.card.rarity)} border-2 hover:scale-105 transition-all duration-300 cursor-pointer relative overflow-hidden`}
+              >
+                <CardContent className="p-3">
+                  <div className="aspect-[3/4] bg-space-black/50 rounded mb-2 flex items-center justify-center">
+                    <i className="fas fa-rocket text-cosmic-gold text-2xl"></i>
                   </div>
                   
-                  <div className="space-y-1">
-                    <div className="font-semibold text-cosmic-gold text-sm truncate">
-                      {userCard.card.name}
-                    </div>
-                    <div className="text-xs text-cosmic-silver">
-                      {userCard.card.type.join(", ")}
-                    </div>
-                    <div className={`text-xs px-2 py-1 rounded text-center ${
-                      userCard.card.rarity === "legendary" ? "bg-purple-600 text-white" :
-                      userCard.card.rarity === "rare" ? "bg-blue-600 text-white" :
-                      userCard.card.rarity === "uncommon" ? "bg-green-600 text-white" :
-                      "bg-gray-600 text-white"
-                    }`}>
+                  <h3 className="font-semibold text-white text-sm mb-1 truncate">
+                    {userCard.card.name.replace(/_/g, ' ')}
+                  </h3>
+                  
+                  <div className="flex items-center justify-between text-xs">
+                    <Badge variant="secondary" className={getRarityColor(userCard.card.rarity)}>
                       {userCard.card.rarity}
-                    </div>
+                    </Badge>
+                    <span className="text-white">x{userCard.quantity}</span>
                   </div>
+                  
+                  <div className="flex justify-between text-xs text-white/70 mt-2">
+                    <span>⚔️ {userCard.card.attack}</span>
+                    <span>🛡️ {userCard.card.defense}</span>
+                    <span>💰 {userCard.card.commandCost}</span>
+                  </div>
+                  
+                  {userCard.card.specialAbility && (
+                    <p className="text-xs text-white/80 mt-2 truncate">
+                      {userCard.card.specialAbility}
+                    </p>
+                  )}
                 </CardContent>
               </Card>
             ))}
           </div>
         )}
       </main>
-
-      {/* Booster Pack Modal */}
-      <BoosterPackModal 
-        isOpen={showBoosterModal}
-        onClose={() => setShowBoosterModal(false)}
-        availablePacks={availablePacks}
-      />
     </div>
   );
 }

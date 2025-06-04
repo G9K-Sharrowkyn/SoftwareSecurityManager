@@ -3,57 +3,54 @@
 @tailwind utilities;
 
 :root {
-  /* MTG-inspired dark theme colors */
-  --background: 210 100% 4%; /* #0A0E1A - Deep space black */
-  --foreground: 210 40% 98%; /* #F8FAFC - Star silver */
-  --muted: 220 14.3% 95.9%; /* Keeping original */
-  --muted-foreground: 220 8.9% 46.1%; /* Keeping original */
-  --popover: 210 100% 4%; /* Match background */
-  --popover-foreground: 210 40% 98%; /* Match foreground */
-  --card: 220 63% 8%; /* #0F172A - Midnight blue */
-  --card-foreground: 210 40% 98%; /* Match foreground */
-  --border: 220 43% 15%; /* #1E293B - Dark border */
-  --input: 220 43% 15%; /* Match border */
-  --primary: 48 100% 50%; /* #FFD700 - Mystic gold */
-  --primary-foreground: 210 100% 4%; /* Dark text on gold */
-  --secondary: 220 43% 15%; /* Dark secondary */
-  --secondary-foreground: 210 40% 98%; /* Light text */
-  --accent: 217 91% 60%; /* #3B82F6 - Cosmic blue */
-  --accent-foreground: 210 40% 98%; /* Light text */
-  --destructive: 0 84.2% 60.2%; /* Red */
-  --destructive-foreground: 60 9.1% 97.8%; /* Light text */
-  --ring: 48 100% 50%; /* Gold ring */
+  --background: 210 100% 4%; /* #000F26 - Deep space black */
+  --foreground: 210 17% 98%; /* #F8FAFC - Star silver */
+  --muted: 210 15% 15%; /* #1E293B - Cosmic blue */
+  --muted-foreground: 210 10% 71%; /* #94A3B8 - Light gray */
+  --popover: 210 100% 4%; /* #000F26 - Deep space black */
+  --popover-foreground: 210 17% 98%; /* #F8FAFC - Star silver */
+  --card: 210 50% 8%; /* #0F172A - Midnight */
+  --card-foreground: 210 17% 98%; /* #F8FAFC - Star silver */
+  --border: 45 100% 50%; /* #FFD700 - Mystic gold */
+  --input: 210 15% 15%; /* #1E293B - Cosmic blue */
+  --primary: 45 100% 50%; /* #FFD700 - Mystic gold */
+  --primary-foreground: 210 100% 4%; /* #000F26 - Deep space black */
+  --secondary: 210 15% 15%; /* #1E293B - Cosmic blue */
+  --secondary-foreground: 210 17% 98%; /* #F8FAFC - Star silver */
+  --accent: 45 100% 47%; /* #F59E0B - Amber */
+  --accent-foreground: 210 100% 4%; /* #000F26 - Deep space black */
+  --destructive: 0 84% 60%; /* #EF4444 - Red */
+  --destructive-foreground: 210 17% 98%; /* #F8FAFC - Star silver */
+  --ring: 45 100% 50%; /* #FFD700 - Mystic gold */
   --radius: 0.5rem;
   
-  /* Custom game colors */
-  --cosmic-gold: 48 100% 50%; /* #FFD700 */
-  --cosmic-blue: 217 91% 60%; /* #3B82F6 */
-  --space-black: 210 100% 4%; /* #0A0E1A */
-  --nebula-purple: 258 90% 66%; /* #A855F7 */
-  --plasma-orange: 20 91% 70%; /* #FB923C */
+  /* Custom cosmic variables */
+  --cosmic-gold: 45 100% 50%; /* #FFD700 */
+  --cosmic-purple: 262 83% 58%; /* #7C3AED */
+  --space-black: 225 39% 6%; /* #0A0A0F */
+  --nebula-blue: 220 39% 24%; /* #16213E */
 }
 
 .dark {
-  /* Dark mode uses same values for consistency */
-  --background: 210 100% 4%;
-  --foreground: 210 40% 98%;
-  --muted: 220 43% 15%;
-  --muted-foreground: 220 8.9% 46.1%;
-  --popover: 210 100% 4%;
-  --popover-foreground: 210 40% 98%;
-  --card: 220 63% 8%;
-  --card-foreground: 210 40% 98%;
-  --border: 220 43% 15%;
-  --input: 220 43% 15%;
-  --primary: 48 100% 50%;
-  --primary-foreground: 210 100% 4%;
-  --secondary: 220 43% 15%;
-  --secondary-foreground: 210 40% 98%;
-  --accent: 217 91% 60%;
-  --accent-foreground: 210 40% 98%;
-  --destructive: 0 62.8% 30.6%;
-  --destructive-foreground: 0 0% 98%;
-  --ring: 48 100% 50%;
+  --background: 210 100% 4%; /* #000F26 */
+  --foreground: 210 17% 98%; /* #F8FAFC */
+  --muted: 210 15% 15%; /* #1E293B */
+  --muted-foreground: 210 10% 71%; /* #94A3B8 */
+  --popover: 210 100% 4%; /* #000F26 */
+  --popover-foreground: 210 17% 98%; /* #F8FAFC */
+  --card: 210 50% 8%; /* #0F172A */
+  --card-foreground: 210 17% 98%; /* #F8FAFC */
+  --border: 45 100% 50%; /* #FFD700 */
+  --input: 210 15% 15%; /* #1E293B */
+  --primary: 45 100% 50%; /* #FFD700 */
+  --primary-foreground: 210 100% 4%; /* #000F26 */
+  --secondary: 210 15% 15%; /* #1E293B */
+  --secondary-foreground: 210 17% 98%; /* #F8FAFC */
+  --accent: 45 100% 47%; /* #F59E0B */
+  --accent-foreground: 210 100% 4%; /* #000F26 */
+  --destructive: 0 62% 30%; /* #DC2626 */
+  --destructive-foreground: 210 17% 98%; /* #F8FAFC */
+  --ring: 45 100% 50%; /* #FFD700 */
 }
 
 @layer base {
@@ -63,221 +60,149 @@
 
   body {
     @apply font-sans antialiased bg-background text-foreground;
-    background: radial-gradient(ellipse at bottom, hsl(var(--cosmic-blue)) 0%, hsl(var(--space-black)) 100%);
+    background: radial-gradient(ellipse at bottom, hsl(var(--nebula-blue)) 0%, hsl(var(--space-black)) 100%);
     min-height: 100vh;
   }
-}
 
-/* Custom game-specific styles */
-@layer components {
-  .star-field {
+  /* Cosmic animations */
+  @keyframes starfield {
+    0% { transform: translateY(0px); }
+    100% { transform: translateY(-100vh); }
+  }
+
+  @keyframes glow {
+    0%, 100% { box-shadow: 0 0 20px rgba(255, 215, 0, 0.5); }
+    50% { box-shadow: 0 0 40px rgba(255, 215, 0, 0.8); }
+  }
+
+  @keyframes pulse-gold {
+    0%, 100% { box-shadow: 0 0 20px rgba(255, 215, 0, 0.3); }
+    50% { box-shadow: 0 0 30px rgba(255, 215, 0, 0.6); }
+  }
+
+  @keyframes card-hover {
+    0% { transform: translateY(0px) scale(1); }
+    100% { transform: translateY(-10px) scale(1.05); }
+  }
+
+  @keyframes shimmer {
+    0% { background-position: -200% -200%; }
+    50% { background-position: 200% 200%; }
+    100% { background-position: -200% -200%; }
+  }
+
+  @keyframes float {
+    0%, 100% { transform: translateY(0px); }
+    50% { transform: translateY(-10px); }
+  }
+
+  /* Utility classes */
+  .animate-glow {
+    animation: glow 2s ease-in-out infinite alternate;
+  }
+
+  .animate-pulse-gold {
+    animation: pulse-gold 2s ease-in-out infinite;
+  }
+
+  .animate-card-hover {
+    animation: card-hover 0.3s ease-in-out;
+  }
+
+  .animate-shimmer {
+    background: linear-gradient(135deg, transparent 0%, rgba(255,215,0,0.1) 25%, rgba(255,215,0,0.3) 50%, rgba(255,215,0,0.1) 75%, transparent 100%);
+    background-size: 200% 200%;
+    animation: shimmer 3s ease-in-out infinite;
+  }
+
+  .animate-float {
+    animation: float 3s ease-in-out infinite;
+  }
+
+  /* Star background */
+  .stars-background {
     position: fixed;
     top: 0;
     left: 0;
     width: 100%;
     height: 100%;
     z-index: -1;
-    background: transparent;
+    pointer-events: none;
   }
-  
+
   .star {
     position: absolute;
     background: white;
     border-radius: 50%;
     opacity: 0.8;
-    animation: twinkle 3s infinite;
+    animation: starfield 20s linear infinite;
   }
-  
-  .card-hover {
-    transition: all 0.3s ease;
+
+  /* Card effects */
+  .card-container {
+    perspective: 1000px;
   }
-  
-  .card-hover:hover {
-    transform: translateY(-8px) scale(1.05);
-    box-shadow: 0 20px 40px rgba(255, 215, 0, 0.3);
+
+  .card-inner {
+    transition: transform 0.3s;
+    transform-style: preserve-3d;
   }
-  
-  .phase-glow {
-    animation: phase-pulse 2s ease-in-out infinite;
+
+  .card-container:hover .card-inner {
+    transform: rotateY(5deg) rotateX(5deg);
   }
-  
-  .game-zone {
-    min-height: 200px;
+
+  .card-glimmer {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .card-glimmer::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255,215,0,0.4), transparent);
+    transition: left 0.5s;
+  }
+
+  .card-glimmer:hover::before {
+    left: 100%;
+  }
+
+  /* Zone effects */
+  .zone-drop-target {
     border: 2px dashed transparent;
     transition: all 0.3s ease;
   }
-  
-  .game-zone.droppable {
-    border-color: hsl(var(--cosmic-gold));
-    background-color: hsla(var(--cosmic-gold), 0.1);
-  }
-  
-  .chat-message {
-    animation: slide-in 0.3s ease-out;
-  }
-  
-  .floating-card {
-    animation: float 3s ease-in-out infinite;
-  }
-}
 
-@layer utilities {
-  .text-cosmic-gold {
-    color: hsl(var(--cosmic-gold));
+  .zone-drop-target:hover {
+    border-color: hsl(var(--primary));
+    background-color: hsla(var(--primary), 0.1);
   }
-  
-  .text-cosmic-blue {
-    color: hsl(var(--cosmic-blue));
+
+  .zone-active {
+    border: 2px solid hsl(var(--primary));
+    box-shadow: inset 0 0 30px hsla(var(--primary), 0.2);
   }
-  
-  .text-space-black {
-    color: hsl(var(--space-black));
+
+  /* Scrollbar styling */
+  ::-webkit-scrollbar {
+    width: 8px;
   }
-  
-  .bg-cosmic-gold {
-    background-color: hsl(var(--cosmic-gold));
+
+  ::-webkit-scrollbar-track {
+    background: hsl(var(--muted));
   }
-  
-  .bg-cosmic-blue {
-    background-color: hsl(var(--cosmic-blue));
+
+  ::-webkit-scrollbar-thumb {
+    background: hsl(var(--primary));
+    border-radius: 4px;
   }
-  
-  .bg-space-black {
-    background-color: hsl(var(--space-black));
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--accent));
   }
-  
-  .border-cosmic-gold {
-    border-color: hsl(var(--cosmic-gold));
-  }
-  
-  .border-cosmic-blue {
-    border-color: hsl(var(--cosmic-blue));
-  }
-}
-
-/* Animations */
-@keyframes twinkle {
-  0%, 100% { opacity: 0.3; }
-  50% { opacity: 1; }
-}
-
-@keyframes phase-pulse {
-  0%, 100% { 
-    box-shadow: 0 0 20px hsla(var(--cosmic-gold), 0.5);
-  }
-  50% { 
-    box-shadow: 0 0 40px hsla(var(--cosmic-gold), 0.8);
-  }
-}
-
-@keyframes slide-in {
-  from {
-    transform: translateX(-100%);
-    opacity: 0;
-  }
-  to {
-    transform: translateX(0);
-    opacity: 1;
-  }
-}
-
-@keyframes float {
-  0%, 100% { transform: translateY(0px); }
-  50% { transform: translateY(-10px); }
-}
-
-/* Card game specific styles */
-.card-container {
-  perspective: 1000px;
-}
-
-.card-flip {
-  transform-style: preserve-3d;
-  transition: transform 0.6s;
-}
-
-.card-flip.flipped {
-  transform: rotateY(180deg);
-}
-
-.card-front, .card-back {
-  backface-visibility: hidden;
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-}
-
-.card-back {
-  transform: rotateY(180deg);
-}
-
-/* Responsive adjustments */
-@media (max-width: 768px) {
-  .card-hover:hover {
-    transform: scale(1.05);
-  }
-  
-  .game-zone {
-    min-height: 150px;
-  }
-}
-
-/* Accessibility improvements */
-@media (prefers-reduced-motion: reduce) {
-  .card-hover:hover {
-    transform: none;
-  }
-  
-  .star {
-    animation: none;
-  }
-  
-  .phase-glow {
-    animation: none;
-  }
-  
-  .floating-card {
-    animation: none;
-  }
-}
-
-/* Focus states for better accessibility */
-.focus-visible:focus {
-  outline: 2px solid hsl(var(--cosmic-gold));
-  outline-offset: 2px;
-}
-
-/* Loading states */
-.loading-shimmer {
-  background: linear-gradient(90deg, 
-    hsla(var(--muted), 0.1) 25%, 
-    hsla(var(--cosmic-gold), 0.1) 50%, 
-    hsla(var(--muted), 0.1) 75%);
-  background-size: 200% 100%;
-  animation: shimmer 2s infinite;
-}
-
-@keyframes shimmer {
-  0% { background-position: -200% 0; }
-  100% { background-position: 200% 0; }
-}
-
-/* Scrollbar styling */
-::-webkit-scrollbar {
-  width: 8px;
-}
-
-::-webkit-scrollbar-track {
-  background: hsl(var(--muted));
-}
-
-::-webkit-scrollbar-thumb {
-  background: hsl(var(--cosmic-gold));
-  border-radius: 4px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: hsl(var(--cosmic-gold) / 0.8);
 }

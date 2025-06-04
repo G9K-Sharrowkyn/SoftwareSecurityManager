@@ -1,96 +1,83 @@
+import { cardsSpecifics } from './CardsSpecifics';
+
 export const Phases = {
   COMMAND: "Command Phase",
-  DEPLOYMENT: "Deployment Phase", 
+  DEPLOYMENT: "Deployment Phase",
   BATTLE: "Battle Phase",
   END_TURN: "End Turn",
-} as const;
-
-export type Phase = typeof Phases[keyof typeof Phases];
+};
 
 export class GameMechanics {
-  private currentPhase: Phase = Phases.COMMAND;
-  private isPlayerTurn = true;
+  private currentPhase: string;
+  private isPlayerTurn: boolean;
 
-  getCurrentPhase(): Phase {
+  constructor() {
+    this.currentPhase = Phases.COMMAND;
+    this.isPlayerTurn = true;
+  }
+
+  startNewRound() {
+    this.currentPhase = Phases.COMMAND;
+    this.isPlayerTurn = !this.isPlayerTurn;
+  }
+
+  getCurrentPhase() {
     return this.currentPhase;
   }
 
-  getNextPhase(currentPhase: Phase): Phase {
-    switch (currentPhase) {
+  endCurrentPhase() {
+    switch (this.currentPhase) {
       case Phases.COMMAND:
-        return Phases.DEPLOYMENT;
+        this.currentPhase = Phases.DEPLOYMENT;
+        break;
       case Phases.DEPLOYMENT:
-        return Phases.BATTLE;
+        this.currentPhase = Phases.BATTLE;
+        break;
       case Phases.BATTLE:
-        return Phases.END_TURN;
+        this.currentPhase = Phases.END_TURN;
+        break;
       case Phases.END_TURN:
-        return Phases.COMMAND;
+        this.startNewRound();
+        break;
       default:
-        return Phases.COMMAND;
+        throw new Error("Unknown game phase");
     }
   }
 
-  endCurrentPhase(): Phase {
-    this.currentPhase = this.getNextPhase(this.currentPhase);
-    
-    if (this.currentPhase === Phases.COMMAND) {
-      this.isPlayerTurn = !this.isPlayerTurn;
-    }
-    
-    return this.currentPhase;
-  }
+  canPlayCardInZone(cardName: string, zone: string) {
+    const card = cardsSpecifics.find(c => c.name === cardName);
 
-  canPlayCardInZone(card: any, zone: string, currentPhase: Phase): boolean {
-    // Command phase: only command and shipyard cards can be played in command zone
-    if (currentPhase === Phases.COMMAND) {
-      return zone === "command" && (
-        card.type?.includes("Shipyard") || 
-        card.type?.includes("Command")
-      );
-    }
-    
-    // Deployment phase: unit cards can be played in unit zone
-    if (currentPhase === Phases.DEPLOYMENT) {
-      return zone === "unit" && card.type?.includes("Unit");
-    }
-    
-    // Battle phase: no card playing allowed
-    if (currentPhase === Phases.BATTLE) {
+    if (!card) {
+      console.error("Card not found:", cardName);
       return false;
     }
-    
-    return false;
+
+    if (card.type.includes("Shipyard")) {
+      return zone === "player-command-zone";
+    } else {
+      return zone === "player-unit-zone" || zone === "player-command-zone";
+    }
   }
 
-  calculateCommandPoints(commandCards: any[]): number {
-    return commandCards.reduce((total, card) => {
-      return total + (card.type?.includes("Shipyard") ? 2 : 1);
-    }, 0);
+  isPlayersTurn() {
+    return this.isPlayerTurn;
   }
 
-  canAffordCard(card: any, availableCommandPoints: number): boolean {
-    return (card.commandCost || 0) <= availableCommandPoints;
+  calculateDamage(attacker: any, defender: any) {
+    // Basic damage calculation
+    const damage = Math.max(0, attacker.attack - defender.defense);
+    return damage;
   }
 
-  resolveBattle(playerUnits: any[], opponentUnits: any[]) {
-    // Simple battle resolution logic
-    const playerPower = playerUnits.reduce((sum, unit) => sum + (unit.attack || 0), 0);
-    const opponentPower = opponentUnits.reduce((sum, unit) => sum + (unit.attack || 0), 0);
-    
-    return {
-      playerDamage: Math.max(0, opponentPower - playerUnits.reduce((sum, unit) => sum + (unit.defense || 0), 0)),
-      opponentDamage: Math.max(0, playerPower - opponentUnits.reduce((sum, unit) => sum + (unit.defense || 0), 0)),
-      playerWins: playerPower > opponentPower
-    };
-  }
-
-  isGameOver(playerHealth: number, opponentHealth: number): { gameOver: boolean; winner?: string } {
+  checkWinCondition(playerHealth: number, opponentHealth: number) {
     if (playerHealth <= 0) {
-      return { gameOver: true, winner: "opponent" };
+      return { gameEnded: true, winner: 'opponent' };
     }
     if (opponentHealth <= 0) {
-      return { gameOver: true, winner: "player" };
+      return { gameEnded: true, winner: 'player' };
     }
-    return { gameOver: false };
+    return { gameEnded: false, winner: null };
   }
 }
+
+export default GameMechanics;

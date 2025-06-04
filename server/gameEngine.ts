@@ -1,430 +1,297 @@
-import { Card } from "@shared/schema";
-
 export interface GameState {
-  gameId: string;
+  currentPhase: 'Command' | 'Deployment' | 'Battle' | 'End Turn';
   currentPlayer: string;
-  currentPhase: "Command" | "Deployment" | "Battle" | "End Turn";
   turnNumber: number;
-  players: {
-    [playerId: string]: PlayerState;
-  };
+  player1Health: number;
+  player2Health: number;
+  player1Hand: Card[];
+  player2Hand: Card[];
+  player1Field: { command: Card[]; units: Card[] };
+  player2Field: { command: Card[]; units: Card[] };
+  player1CommandPoints: number;
+  player2CommandPoints: number;
+  player1Deck: Card[];
+  player2Deck: Card[];
+  gameLog: GameLogEntry[];
 }
 
-export interface PlayerState {
-  id: string;
-  health: number;
-  hand: Card[];
-  deck: Card[];
-  graveyard: Card[];
-  commandZone: Card[];
-  unitZone: Card[];
-  commandPoints: number;
-  hasDrawnCard: boolean;
-  hasPlayedCommandCard: boolean;
+export interface Card {
+  id: number;
+  name: string;
+  type: string;
+  cost: number;
+  attack: number;
+  defense: number;
+  commandCost: number;
+  unitMembers: number;
+  rarity: string;
+  imageUrl?: string;
+  specialAbility?: string;
+  traits: string[];
 }
 
-export interface GameMove {
-  type: "draw_card" | "play_card" | "end_phase" | "attack" | "activate_ability";
-  data: any;
+export interface GameLogEntry {
+  timestamp: Date;
+  playerId: string;
+  action: string;
+  details: any;
 }
 
-class GameEngine {
-  initializeGame(player1Id: string, player2Id: string | null): GameState {
+export interface GameAction {
+  type: 'play_card' | 'end_phase' | 'draw_card' | 'attack' | 'use_ability';
+  cardId?: number;
+  targetId?: number;
+  zoneType?: 'command' | 'unit';
+  data?: any;
+}
+
+export class GameEngine {
+  constructor() {}
+
+  initializeGame(player1Id: string, player2Id?: string): GameState {
+    // This would typically load deck data from the database
+    // For now, creating a basic starting state
     const initialDeck = this.createStarterDeck();
     
-    const gameState: GameState = {
-      gameId: "",
+    const initialState: GameState = {
+      currentPhase: 'Command',
       currentPlayer: player1Id,
-      currentPhase: "Command",
       turnNumber: 1,
-      players: {}
+      player1Health: 100,
+      player2Health: 100,
+      player1Hand: this.drawCards(initialDeck, 7),
+      player2Hand: player2Id ? this.drawCards(initialDeck, 7) : [],
+      player1Field: { command: [], units: [] },
+      player2Field: { command: [], units: [] },
+      player1CommandPoints: 0,
+      player2CommandPoints: 0,
+      player1Deck: initialDeck.slice(7),
+      player2Deck: player2Id ? initialDeck.slice(7) : [],
+      gameLog: []
     };
 
-    // Initialize player 1
-    gameState.players[player1Id] = this.initializePlayer(player1Id, [...initialDeck]);
-    
-    // Initialize player 2 (AI or human)
-    if (player2Id) {
-      gameState.players[player2Id] = this.initializePlayer(player2Id, [...initialDeck]);
-    } else {
-      // AI player
-      gameState.players["ai"] = this.initializePlayer("ai", [...initialDeck]);
+    this.addLogEntry(initialState, 'system', 'Game initialized');
+    return initialState;
+  }
+
+  processAction(gameState: GameState, action: GameAction, playerId: string): GameState {
+    const newState = { ...gameState };
+
+    // Validate if it's the player's turn
+    if (newState.currentPlayer !== playerId && playerId !== 'ai') {
+      return newState;
     }
 
-    // Draw initial hands
-    this.drawInitialHand(gameState.players[player1Id]);
-    this.drawInitialHand(gameState.players[player2Id || "ai"]);
-
-    return gameState;
+    switch (action.type) {
+      case 'play_card':
+        return this.handlePlayCard(newState, action, playerId);
+      case 'end_phase':
+        return this.handleEndPhase(newState, playerId);
+      case 'draw_card':
+        return this.handleDrawCard(newState, playerId);
+      case 'attack':
+        return this.handleAttack(newState, action, playerId);
+      case 'use_ability':
+        return this.handleUseAbility(newState, action, playerId);
+      default:
+        return newState;
+    }
   }
 
-  private initializePlayer(playerId: string, deck: Card[]): PlayerState {
-    this.shuffleDeck(deck);
+  private handlePlayCard(gameState: GameState, action: GameAction, playerId: string): GameState {
+    const newState = { ...gameState };
+    const isPlayer1 = playerId === newState.currentPlayer && playerId !== 'ai';
+    const hand = isPlayer1 ? newState.player1Hand : newState.player2Hand;
+    const field = isPlayer1 ? newState.player1Field : newState.player2Field;
     
-    return {
-      id: playerId,
-      health: 100,
-      hand: [],
-      deck,
-      graveyard: [],
-      commandZone: [],
-      unitZone: [],
-      commandPoints: 0,
-      hasDrawnCard: false,
-      hasPlayedCommandCard: false
-    };
-  }
+    const cardIndex = hand.findIndex(card => card.id === action.cardId);
+    if (cardIndex === -1) return newState;
 
-  private createStarterDeck(): Card[] {
-    // Create a balanced starter deck with mock cards
-    const starterCards: Card[] = [];
+    const card = hand[cardIndex];
     
-    // Add some basic units and commands
-    for (let i = 0; i < 20; i++) {
-      starterCards.push({
-        id: 1000 + i,
-        name: `Starter Unit ${i + 1}`,
-        type: "Unit",
-        cost: Math.floor(Math.random() * 5) + 1,
-        attack: Math.floor(Math.random() * 4) + 1,
-        defense: Math.floor(Math.random() * 4) + 1,
-        commandCost: Math.floor(Math.random() * 5) + 1,
-        unitMembers: 1,
-        specialAbility: "Basic unit",
-        rarity: "Common",
-        imageUrl: "/api/placeholder/unit",
-        createdAt: new Date()
-      });
+    // Check if card can be played in current phase
+    if (!this.canPlayCard(card, newState.currentPhase, action.zoneType)) {
+      return newState;
     }
 
-    return starterCards;
-  }
-
-  private drawInitialHand(player: PlayerState): void {
-    for (let i = 0; i < 7; i++) {
-      if (player.deck.length > 0) {
-        const card = player.deck.pop()!;
-        player.hand.push(card);
+    // Check command points for deployment phase
+    if (newState.currentPhase === 'Deployment' && action.zoneType === 'unit') {
+      const commandPoints = isPlayer1 ? newState.player1CommandPoints : newState.player2CommandPoints;
+      if (card.commandCost > commandPoints) {
+        return newState;
+      }
+      
+      if (isPlayer1) {
+        newState.player1CommandPoints -= card.commandCost;
+      } else {
+        newState.player2CommandPoints -= card.commandCost;
       }
     }
-  }
 
-  private shuffleDeck(deck: Card[]): void {
-    for (let i = deck.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [deck[i], deck[j]] = [deck[j], deck[i]];
-    }
-  }
-
-  processMove(gameState: GameState, playerId: string, moveType: string, moveData: any): GameState {
-    const newState = JSON.parse(JSON.stringify(gameState)); // Deep clone
-    const player = newState.players[playerId];
-
-    if (!player) {
-      throw new Error("Player not found");
-    }
-
-    if (newState.currentPlayer !== playerId) {
-      throw new Error("Not your turn");
-    }
-
-    try {
-      switch (moveType) {
-        case "draw_card":
-          this.processDrawCard(newState, player);
-          break;
-        
-        case "play_card":
-          this.processPlayCard(newState, player, moveData);
-          break;
-        
-        case "end_phase":
-          this.processEndPhase(newState);
-          break;
-        
-        case "attack":
-          this.processAttack(newState, player, moveData);
-          break;
-        
-        case "activate_ability":
-          this.processActivateAbility(newState, player, moveData);
-          break;
-        
-        default:
-          throw new Error("Unknown move type");
+    // Remove card from hand and add to appropriate field
+    hand.splice(cardIndex, 1);
+    
+    if (action.zoneType === 'command') {
+      field.command.push(card);
+      // Add command points if it's a shipyard
+      if (card.type === 'Shipyard') {
+        if (isPlayer1) {
+          newState.player1CommandPoints += 2;
+        } else {
+          newState.player2CommandPoints += 2;
+        }
+      } else {
+        if (isPlayer1) {
+          newState.player1CommandPoints += 1;
+        } else {
+          newState.player2CommandPoints += 1;
+        }
       }
-    } catch (error) {
-      console.error("Error processing move:", error);
-      throw error;
+    } else if (action.zoneType === 'unit') {
+      field.units.push(card);
+    }
+
+    this.addLogEntry(newState, playerId, `Played ${card.name} to ${action.zoneType} zone`);
+    
+    return newState;
+  }
+
+  private handleEndPhase(gameState: GameState, playerId: string): GameState {
+    const newState = { ...gameState };
+    
+    switch (newState.currentPhase) {
+      case 'Command':
+        newState.currentPhase = 'Deployment';
+        break;
+      case 'Deployment':
+        newState.currentPhase = 'Battle';
+        break;
+      case 'Battle':
+        newState.currentPhase = 'End Turn';
+        break;
+      case 'End Turn':
+        // Switch to next player and start new turn
+        newState.currentPhase = 'Command';
+        newState.turnNumber++;
+        // For AI games, keep player1 as current player
+        if (newState.player2Health > 0) {
+          newState.currentPlayer = newState.currentPlayer === newState.currentPlayer ? 'ai' : newState.currentPlayer;
+        }
+        break;
+    }
+
+    this.addLogEntry(newState, playerId, `Ended ${gameState.currentPhase} phase`);
+    
+    return newState;
+  }
+
+  private handleDrawCard(gameState: GameState, playerId: string): GameState {
+    const newState = { ...gameState };
+    
+    // Only allow drawing in Command phase
+    if (newState.currentPhase !== 'Command') {
+      return newState;
+    }
+
+    const isPlayer1 = playerId === newState.currentPlayer && playerId !== 'ai';
+    const deck = isPlayer1 ? newState.player1Deck : newState.player2Deck;
+    const hand = isPlayer1 ? newState.player1Hand : newState.player2Hand;
+
+    if (deck.length > 0) {
+      const drawnCard = deck.shift()!;
+      hand.push(drawnCard);
+      this.addLogEntry(newState, playerId, `Drew a card`);
     }
 
     return newState;
   }
 
-  private processDrawCard(gameState: GameState, player: PlayerState): void {
-    if (gameState.currentPhase !== "Command" || player.hasDrawnCard) {
-      throw new Error("Cannot draw card now");
-    }
-
-    if (player.deck.length === 0) {
-      throw new Error("No cards left in deck");
-    }
-
-    const card = player.deck.pop()!;
-    player.hand.push(card);
-    player.hasDrawnCard = true;
-  }
-
-  private processPlayCard(gameState: GameState, player: PlayerState, moveData: { cardId: number; zone: string }): void {
-    const cardIndex = player.hand.findIndex(card => card.id === moveData.cardId);
-    if (cardIndex === -1) {
-      throw new Error("Card not found in hand");
-    }
-
-    const card = player.hand[cardIndex];
-
-    // Validate the move based on current phase and card type
-    if (gameState.currentPhase === "Command") {
-      if (moveData.zone !== "command" || !card.type.includes("Shipyard")) {
-        throw new Error("Can only play Shipyard cards to command zone in Command phase");
-      }
-      
-      if (player.hasPlayedCommandCard) {
-        throw new Error("Can only play one command card per turn");
-      }
-
-      player.commandZone.push(card);
-      player.commandPoints += card.type.includes("Shipyard") ? 2 : 1;
-      player.hasPlayedCommandCard = true;
-      
-    } else if (gameState.currentPhase === "Deployment") {
-      if (moveData.zone === "unit" && card.type === "Unit") {
-        if (card.commandCost > player.commandPoints) {
-          throw new Error("Not enough command points");
-        }
-        
-        player.unitZone.push(card);
-        player.commandPoints -= card.commandCost;
-        
-      } else if (moveData.zone === "command" && card.type === "Command") {
-        if (card.commandCost > player.commandPoints) {
-          throw new Error("Not enough command points");
-        }
-        
-        // Execute command card effect immediately
-        this.executeCommandEffect(gameState, player, card);
-        player.graveyard.push(card);
-        player.commandPoints -= card.commandCost;
-        
-      } else {
-        throw new Error("Invalid card placement");
-      }
-    } else {
-      throw new Error("Cannot play cards in this phase");
-    }
-
-    player.hand.splice(cardIndex, 1);
-  }
-
-  private executeCommandEffect(gameState: GameState, player: PlayerState, card: Card): void {
-    // Basic command card effects
-    switch (card.name) {
-      case "Tactical Strike":
-        // Deal damage logic would go here
-        break;
-      case "Shield Matrix":
-        // Buff units logic would go here
-        break;
-      case "Fleet Mobilization":
-        // Draw cards logic
-        for (let i = 0; i < 2 && player.deck.length > 0; i++) {
-          const drawnCard = player.deck.pop()!;
-          player.hand.push(drawnCard);
-        }
-        break;
-    }
-  }
-
-  private processEndPhase(gameState: GameState): void {
-    const currentPlayer = gameState.players[gameState.currentPlayer];
-
-    switch (gameState.currentPhase) {
-      case "Command":
-        gameState.currentPhase = "Deployment";
-        break;
-      case "Deployment":
-        gameState.currentPhase = "Battle";
-        break;
-      case "Battle":
-        gameState.currentPhase = "End Turn";
-        break;
-      case "End Turn":
-        // Switch to next player and reset phase
-        this.switchToNextPlayer(gameState);
-        gameState.currentPhase = "Command";
-        gameState.turnNumber++;
-        
-        // Reset turn-based flags
-        const nextPlayer = gameState.players[gameState.currentPlayer];
-        nextPlayer.hasDrawnCard = false;
-        nextPlayer.hasPlayedCommandCard = false;
-        
-        // Calculate command points for new turn
-        nextPlayer.commandPoints = this.calculateCommandPoints(nextPlayer);
-        break;
-    }
-  }
-
-  private switchToNextPlayer(gameState: GameState): void {
-    const playerIds = Object.keys(gameState.players);
-    const currentIndex = playerIds.indexOf(gameState.currentPlayer);
-    const nextIndex = (currentIndex + 1) % playerIds.length;
-    gameState.currentPlayer = playerIds[nextIndex];
-  }
-
-  private calculateCommandPoints(player: PlayerState): number {
-    return player.commandZone.reduce((total, card) => {
-      return total + (card.type.includes("Shipyard") ? 2 : 1);
-    }, 0);
-  }
-
-  private processAttack(gameState: GameState, player: PlayerState, moveData: { attackerId: number; targetId?: number }): void {
-    if (gameState.currentPhase !== "Battle") {
-      throw new Error("Can only attack during Battle phase");
-    }
-
-    const attackerCard = player.unitZone.find(card => card.id === moveData.attackerId);
-    if (!attackerCard) {
-      throw new Error("Attacker card not found");
-    }
-
-    if (moveData.targetId) {
-      // Attack specific unit
-      const opponentId = this.getOpponentId(gameState, player.id);
-      const opponent = gameState.players[opponentId];
-      const targetCard = opponent.unitZone.find(card => card.id === moveData.targetId);
-      
-      if (targetCard) {
-        this.resolveCombat(attackerCard, targetCard, player, opponent);
-      }
-    } else {
-      // Direct attack on opponent
-      const opponentId = this.getOpponentId(gameState, player.id);
-      const opponent = gameState.players[opponentId];
-      opponent.health -= attackerCard.attack;
-      
-      if (opponent.health <= 0) {
-        this.endGame(gameState, player.id);
-      }
-    }
-  }
-
-  private resolveCombat(attacker: Card, defender: Card, attackingPlayer: PlayerState, defendingPlayer: PlayerState): void {
-    // Simple combat resolution
-    const attackerSurvives = attacker.defense > defender.attack;
-    const defenderSurvives = defender.defense > attacker.attack;
-
-    if (!attackerSurvives) {
-      const attackerIndex = attackingPlayer.unitZone.findIndex(card => card.id === attacker.id);
-      if (attackerIndex !== -1) {
-        const removedCard = attackingPlayer.unitZone.splice(attackerIndex, 1)[0];
-        attackingPlayer.graveyard.push(removedCard);
-      }
-    }
-
-    if (!defenderSurvives) {
-      const defenderIndex = defendingPlayer.unitZone.findIndex(card => card.id === defender.id);
-      if (defenderIndex !== -1) {
-        const removedCard = defendingPlayer.unitZone.splice(defenderIndex, 1)[0];
-        defendingPlayer.graveyard.push(removedCard);
-      }
-    }
-  }
-
-  private processActivateAbility(gameState: GameState, player: PlayerState, moveData: { cardId: number; abilityData?: any }): void {
-    const card = [...player.unitZone, ...player.commandZone].find(c => c.id === moveData.cardId);
-    if (!card) {
-      throw new Error("Card not found");
-    }
-
-    // Execute card-specific abilities
-    this.executeCardAbility(gameState, player, card, moveData.abilityData);
-  }
-
-  private executeCardAbility(gameState: GameState, player: PlayerState, card: Card, abilityData: any): void {
-    // This would contain specific card ability implementations
-    console.log(`Executing ability for ${card.name}`);
-  }
-
-  private getOpponentId(gameState: GameState, playerId: string): string {
-    const playerIds = Object.keys(gameState.players);
-    return playerIds.find(id => id !== playerId) || "";
-  }
-
-  private endGame(gameState: GameState, winnerId: string): void {
-    gameState.currentPhase = "End Turn";
-    // Additional game end logic would go here
-  }
-
-  // Validation methods
-  canPlayCard(gameState: GameState, playerId: string, cardId: number, zone: string): boolean {
-    const player = gameState.players[playerId];
-    const card = player.hand.find(c => c.id === cardId);
+  private handleAttack(gameState: GameState, action: GameAction, playerId: string): GameState {
+    const newState = { ...gameState };
     
-    if (!card) return false;
+    // Only allow attacks in Battle phase
+    if (newState.currentPhase !== 'Battle') {
+      return newState;
+    }
 
-    if (gameState.currentPhase === "Command") {
-      return zone === "command" && card.type.includes("Shipyard") && !player.hasPlayedCommandCard;
-    } else if (gameState.currentPhase === "Deployment") {
-      if (zone === "unit" && card.type === "Unit") {
-        return card.commandCost <= player.commandPoints;
-      } else if (zone === "command" && card.type === "Command") {
-        return card.commandCost <= player.commandPoints;
-      }
+    // Implementation for combat system
+    // This would handle unit vs unit combat, direct attacks, etc.
+    this.addLogEntry(newState, playerId, `Initiated attack`);
+    
+    return newState;
+  }
+
+  private handleUseAbility(gameState: GameState, action: GameAction, playerId: string): GameState {
+    const newState = { ...gameState };
+    
+    // Implementation for special abilities
+    this.addLogEntry(newState, playerId, `Used special ability`);
+    
+    return newState;
+  }
+
+  private canPlayCard(card: Card, phase: string, zoneType?: string): boolean {
+    if (phase === 'Command' && zoneType === 'command') {
+      return true;
+    }
+    
+    if (phase === 'Deployment' && zoneType === 'unit') {
+      return card.type !== 'Shipyard';
     }
     
     return false;
   }
 
-  getValidMoves(gameState: GameState, playerId: string): string[] {
-    const moves: string[] = [];
-    const player = gameState.players[playerId];
-
-    if (gameState.currentPlayer !== playerId) {
-      return moves;
+  private createStarterDeck(): Card[] {
+    // This would typically load from a predefined starter deck
+    // For now, creating some basic cards
+    const starterCards: Card[] = [];
+    
+    // Add basic cards with proper structure
+    for (let i = 0; i < 30; i++) {
+      starterCards.push({
+        id: 1000 + i,
+        name: `Basic Unit ${i + 1}`,
+        type: 'Unit',
+        cost: Math.floor(i / 5) + 1,
+        attack: Math.floor(i / 10) + 1,
+        defense: Math.floor(i / 10) + 1,
+        commandCost: Math.floor(i / 5) + 1,
+        unitMembers: 1,
+        rarity: 'Common',
+        traits: ['Basic']
+      });
     }
+    
+    return starterCards;
+  }
 
-    switch (gameState.currentPhase) {
-      case "Command":
-        if (!player.hasDrawnCard && player.deck.length > 0) {
-          moves.push("draw_card");
-        }
-        if (!player.hasPlayedCommandCard) {
-          moves.push("play_command_card");
-        }
-        moves.push("end_phase");
-        break;
-        
-      case "Deployment":
-        moves.push("play_unit");
-        moves.push("play_command");
-        moves.push("end_phase");
-        break;
-        
-      case "Battle":
-        if (player.unitZone.length > 0) {
-          moves.push("attack");
-        }
-        moves.push("end_phase");
-        break;
-        
-      case "End Turn":
-        moves.push("end_phase");
-        break;
+  private drawCards(deck: Card[], count: number): Card[] {
+    const drawn = [];
+    for (let i = 0; i < Math.min(count, deck.length); i++) {
+      drawn.push(deck[i]);
     }
+    return drawn;
+  }
 
-    return moves;
+  private addLogEntry(gameState: GameState, playerId: string, action: string, details?: any): void {
+    gameState.gameLog.push({
+      timestamp: new Date(),
+      playerId,
+      action,
+      details
+    });
+  }
+
+  isGameOver(gameState: GameState): { isOver: boolean; winner?: string } {
+    if (gameState.player1Health <= 0) {
+      return { isOver: true, winner: gameState.player2Health > 0 ? 'player2' : undefined };
+    }
+    
+    if (gameState.player2Health <= 0) {
+      return { isOver: true, winner: gameState.player1Health > 0 ? 'player1' : undefined };
+    }
+    
+    return { isOver: false };
   }
 }
-
-export const gameEngine = new GameEngine();

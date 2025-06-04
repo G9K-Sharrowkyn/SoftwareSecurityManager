@@ -1,21 +1,20 @@
-import { useEffect } from "react";
-import { useParams, useLocation } from "wouter";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useParams } from "wouter";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import { isUnauthorizedError } from "@/lib/authUtils";
 import GameInterface from "@/components/game/GameInterface";
+import StarBackground from "@/components/ui/star-background";
 
 export default function Game() {
-  const params = useParams();
-  const [, setLocation] = useLocation();
-  const { isAuthenticated, isLoading } = useAuth();
+  const { matchId } = useParams();
+  const { user, isLoading } = useAuth();
   const { toast } = useToast();
-  const gameId = params.id;
 
-  // Redirect if not authenticated
+  // Redirect to login if not authenticated
   useEffect(() => {
-    if (!isLoading && !isAuthenticated) {
+    if (!isLoading && !user) {
       toast({
         title: "Unauthorized",
         description: "You are logged out. Logging in again...",
@@ -26,66 +25,52 @@ export default function Game() {
       }, 500);
       return;
     }
-  }, [isAuthenticated, isLoading, toast]);
+  }, [user, isLoading, toast]);
 
-  // Fetch game data if gameId exists
-  const { data: game, isLoading: gameLoading, error } = useQuery({
-    queryKey: ["/api/games", gameId],
-    enabled: isAuthenticated && !!gameId,
+  const { data: match, isLoading: matchLoading } = useQuery({
+    queryKey: [`/api/matches/${matchId}`],
+    enabled: !!matchId,
     retry: false,
   });
 
-  useEffect(() => {
-    if (error && isUnauthorizedError(error)) {
-      toast({
-        title: "Unauthorized",
-        description: "You are logged out. Logging in again...",
-        variant: "destructive",
-      });
-      setTimeout(() => {
-        window.location.href = "/api/login";
-      }, 500);
-      return;
-    }
-  }, [error, toast]);
+  const { data: cards } = useQuery({
+    queryKey: ["/api/cards"],
+    retry: false,
+  });
 
-  const handleExitGame = () => {
-    setLocation("/");
-  };
-
-  if (isLoading || gameLoading) {
+  if (isLoading || matchLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center relative z-10">
-        <div className="text-cosmic-gold text-xl">Loading game...</div>
+      <div className="min-h-screen flex items-center justify-center">
+        <StarBackground />
+        <div className="relative z-10 text-cosmic-gold">Loading game...</div>
       </div>
     );
   }
 
-  if (!isAuthenticated) {
+  if (!user) {
     return null;
   }
 
-  if (gameId && !game) {
+  if (!matchId) {
     return (
-      <div className="min-h-screen flex items-center justify-center relative z-10">
-        <div className="text-center space-y-4">
-          <div className="text-red-400 text-xl">Game not found</div>
-          <button 
-            onClick={handleExitGame}
-            className="bg-cosmic-gold text-cosmic-900 px-6 py-2 rounded-lg font-semibold hover:bg-cosmic-gold/80 transition-colors"
-          >
-            Return to Home
-          </button>
+      <div className="min-h-screen flex items-center justify-center">
+        <StarBackground />
+        <div className="relative z-10 text-center">
+          <h1 className="text-2xl font-bold text-cosmic-gold mb-4">No Match Selected</h1>
+          <p className="text-foreground/70">Please select a match to play.</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen relative z-10">
+    <div className="min-h-screen relative">
+      <StarBackground />
       <GameInterface 
-        game={game}
-        onExitGame={handleExitGame}
+        matchId={matchId}
+        user={user}
+        match={match}
+        cards={cards || []}
       />
     </div>
   );

@@ -1,231 +1,237 @@
+import { useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useAuth } from "@/hooks/useAuth";
+import { useToast } from "@/hooks/use-toast";
 import StarBackground from "@/components/ui/star-background";
-import { Card, CardContent } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import type { User } from "@shared/schema";
+import Navigation from "@/components/ui/navigation";
 
 export default function Rankings() {
-  const { user } = useAuth();
+  const { user, isLoading } = useAuth();
+  const { toast } = useToast();
 
-  const { data: leaderboard = [], isLoading } = useQuery({
+  // Redirect to login if not authenticated
+  useEffect(() => {
+    if (!isLoading && !user) {
+      toast({
+        title: "Unauthorized",
+        description: "You are logged out. Logging in again...",
+        variant: "destructive",
+      });
+      setTimeout(() => {
+        window.location.href = "/api/login";
+      }, 500);
+      return;
+    }
+  }, [user, isLoading, toast]);
+
+  const { data: leaderboard, isLoading: leaderboardLoading } = useQuery({
     queryKey: ["/api/leaderboard"],
     retry: false,
   });
 
-  const getRankEmoji = (rank: number) => {
+  if (isLoading || leaderboardLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-cosmic-gold">Loading...</div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return null;
+  }
+
+  const rankings = leaderboard || [];
+  const userRank = rankings.findIndex((player: any) => player.id === user.id) + 1;
+
+  const getRankIcon = (rank: number) => {
     switch (rank) {
-      case 1: return "🥇";
-      case 2: return "🥈";
-      case 3: return "🥉";
-      default: return "⭐";
+      case 1: return { icon: "fas fa-crown", color: "text-yellow-400" };
+      case 2: return { icon: "fas fa-medal", color: "text-gray-300" };
+      case 3: return { icon: "fas fa-award", color: "text-yellow-600" };
+      default: return { icon: "fas fa-hashtag", color: "text-cosmic-gold" };
     }
   };
 
-  const getRankColor = (rank: number) => {
-    switch (rank) {
-      case 1: return "text-yellow-400 border-yellow-400";
-      case 2: return "text-gray-300 border-gray-300";
-      case 3: return "text-amber-600 border-amber-600";
-      default: return "text-cosmic-silver border-cosmic-600";
-    }
+  const getRankBadge = (rank: number) => {
+    if (rank <= 3) return "default";
+    if (rank <= 10) return "secondary";
+    return "outline";
   };
 
   return (
     <div className="min-h-screen relative">
       <StarBackground />
+      <Navigation />
       
-      <div className="relative z-10">
-        {/* Navigation Header */}
-        <nav className="bg-cosmic-800/90 backdrop-blur-md border-b border-cosmic-600">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div className="flex justify-between items-center h-16">
-              <div className="flex items-center space-x-4">
-                <div className="flex items-center space-x-2">
-                  <span className="text-2xl">🚀</span>
-                  <span className="text-xl font-bold text-cosmic-gold">Proteus Nebula</span>
+      <main className="relative z-10 container mx-auto px-4 py-8">
+        <div className="flex items-center justify-between mb-8">
+          <h1 className="text-4xl font-bold text-cosmic-gold animate-glow">
+            <i className="fas fa-trophy mr-3"></i>
+            Galactic Rankings
+          </h1>
+          {userRank > 0 && (
+            <Badge variant="secondary" className="text-lg px-4 py-2">
+              Your Rank: #{userRank}
+            </Badge>
+          )}
+        </div>
+
+        {/* Top 3 Podium */}
+        {rankings.length >= 3 && (
+          <Card className="bg-cosmic-blue/30 border-cosmic-gold/30 mb-8">
+            <CardHeader>
+              <CardTitle className="text-cosmic-gold text-center">
+                Elite Commanders
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="flex justify-center items-end space-x-8">
+                {/* 2nd Place */}
+                <div className="text-center">
+                  <div className="relative">
+                    <Avatar className="w-20 h-20 mx-auto mb-4 border-4 border-gray-300">
+                      <AvatarImage src={rankings[1]?.profileImageUrl} />
+                      <AvatarFallback className="bg-gray-300 text-space-black text-xl">
+                        {rankings[1]?.username?.charAt(0) || "2"}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div className="absolute -top-2 -right-2 w-8 h-8 bg-gray-300 rounded-full flex items-center justify-center">
+                      <i className="fas fa-medal text-gray-700"></i>
+                    </div>
+                  </div>
+                  <h3 className="font-bold text-lg">{rankings[1]?.username}</h3>
+                  <p className="text-sm text-foreground/70">{rankings[1]?.wins} wins</p>
+                  <p className="text-sm text-green-400">{rankings[1]?.winRate}% win rate</p>
+                </div>
+
+                {/* 1st Place */}
+                <div className="text-center">
+                  <div className="relative">
+                    <Avatar className="w-24 h-24 mx-auto mb-4 border-4 border-yellow-400">
+                      <AvatarImage src={rankings[0]?.profileImageUrl} />
+                      <AvatarFallback className="bg-yellow-400 text-space-black text-2xl">
+                        {rankings[0]?.username?.charAt(0) || "1"}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div className="absolute -top-2 -right-2 w-10 h-10 bg-yellow-400 rounded-full flex items-center justify-center">
+                      <i className="fas fa-crown text-yellow-800"></i>
+                    </div>
+                  </div>
+                  <h3 className="font-bold text-xl text-yellow-400">{rankings[0]?.username}</h3>
+                  <p className="text-sm text-foreground/70">{rankings[0]?.wins} wins</p>
+                  <p className="text-sm text-green-400">{rankings[0]?.winRate}% win rate</p>
+                  <Badge className="mt-2 bg-yellow-400 text-space-black">Champion</Badge>
+                </div>
+
+                {/* 3rd Place */}
+                <div className="text-center">
+                  <div className="relative">
+                    <Avatar className="w-20 h-20 mx-auto mb-4 border-4 border-yellow-600">
+                      <AvatarImage src={rankings[2]?.profileImageUrl} />
+                      <AvatarFallback className="bg-yellow-600 text-space-black text-xl">
+                        {rankings[2]?.username?.charAt(0) || "3"}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div className="absolute -top-2 -right-2 w-8 h-8 bg-yellow-600 rounded-full flex items-center justify-center">
+                      <i className="fas fa-award text-yellow-800"></i>
+                    </div>
+                  </div>
+                  <h3 className="font-bold text-lg">{rankings[2]?.username}</h3>
+                  <p className="text-sm text-foreground/70">{rankings[2]?.wins} wins</p>
+                  <p className="text-sm text-green-400">{rankings[2]?.winRate}% win rate</p>
                 </div>
               </div>
-              
-              <div className="hidden md:flex items-center space-x-6">
-                <a href="/game" className="text-cosmic-silver hover:text-cosmic-gold transition-colors duration-200 font-medium">
-                  🎮 Game
-                </a>
-                <a href="/collection" className="text-cosmic-silver hover:text-cosmic-gold transition-colors duration-200 font-medium">
-                  🎴 Collection
-                </a>
-                <a href="/deck-builder" className="text-cosmic-silver hover:text-cosmic-gold transition-colors duration-200 font-medium">
-                  🏗️ Deck Builder
-                </a>
-                <a href="/rankings" className="text-cosmic-gold font-medium">
-                  🏆 Rankings
-                </a>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Full Leaderboard */}
+        <Card className="bg-cosmic-blue/30 border-cosmic-gold/30">
+          <CardHeader>
+            <CardTitle className="text-cosmic-gold">
+              <i className="fas fa-list mr-2"></i>
+              Full Leaderboard
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {rankings.length === 0 ? (
+              <div className="text-center py-12">
+                <i className="fas fa-trophy text-6xl text-cosmic-gold/30 mb-4"></i>
+                <h3 className="text-xl font-semibold text-cosmic-gold mb-2">No Rankings Yet</h3>
+                <p className="text-foreground/70">
+                  Be the first to compete and claim your place in the galaxy!
+                </p>
               </div>
-
-              <div className="flex items-center space-x-4">
-                <div className="flex items-center space-x-2 bg-cosmic-700 px-3 py-2 rounded-lg">
-                  <span className="text-sm font-semibold text-cosmic-gold">💰 {user?.credits || 0}</span>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <div className="w-10 h-10 rounded-full border-2 border-cosmic-gold bg-cosmic-700 flex items-center justify-center">
-                    <span className="text-cosmic-gold">👨‍🚀</span>
-                  </div>
-                  <span className="text-sm font-medium text-cosmic-silver">{user?.username || 'Commander'}</span>
-                </div>
-                <Button
-                  onClick={() => window.location.href = "/api/logout"}
-                  variant="outline"
-                  size="sm"
-                  className="border-cosmic-gold/30 text-cosmic-silver hover:bg-cosmic-gold hover:text-cosmic-900"
-                >
-                  Logout
-                </Button>
-              </div>
-            </div>
-          </div>
-        </nav>
-
-        {/* Main Content */}
-        <main className="min-h-screen pt-6">
-          <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
-            {/* Header */}
-            <div className="text-center mb-12">
-              <h1 className="text-4xl md:text-6xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-cosmic-gold to-cosmic-silver mb-4">
-                Galactic Rankings
-              </h1>
-              <p className="text-xl text-cosmic-silver mb-8">
-                The most skilled commanders across the nebula
-              </p>
-            </div>
-
-            {/* Player's Current Rank */}
-            {user && (
-              <Card className="bg-cosmic-800/50 border border-cosmic-gold/30 mb-8">
-                <CardContent className="p-6">
-                  <h2 className="text-xl font-bold text-cosmic-gold mb-4 text-center">Your Current Standing</h2>
-                  <div className="flex items-center justify-center space-x-8">
-                    <div className="text-center">
-                      <div className="text-3xl font-bold text-cosmic-gold">{user.wins || 0}</div>
-                      <div className="text-cosmic-silver">Wins</div>
-                    </div>
-                    <div className="text-center">
-                      <div className="text-3xl font-bold text-cosmic-gold">{user.losses || 0}</div>
-                      <div className="text-cosmic-silver">Losses</div>
-                    </div>
-                    <div className="text-center">
-                      <div className="text-3xl font-bold text-cosmic-gold">
-                        {user.wins && user.losses ? Math.round((user.wins / (user.wins + user.losses)) * 100) : 0}%
-                      </div>
-                      <div className="text-cosmic-silver">Win Rate</div>
-                    </div>
-                    <div className="text-center">
-                      <div className="text-3xl font-bold text-cosmic-gold">{user.level || 1}</div>
-                      <div className="text-cosmic-silver">Level</div>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-
-            {/* Leaderboard */}
-            <Card className="bg-cosmic-800/50 border border-cosmic-600">
-              <CardContent className="p-6">
-                <h2 className="text-2xl font-bold text-cosmic-gold mb-6 text-center">Top Commanders</h2>
-                
-                {isLoading ? (
-                  <div className="text-center py-12">
-                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-cosmic-gold mx-auto"></div>
-                    <p className="text-cosmic-silver mt-4">Loading rankings...</p>
-                  </div>
-                ) : leaderboard.length === 0 ? (
-                  <div className="text-center py-12">
-                    <div className="text-6xl mb-4">🏆</div>
-                    <h3 className="text-2xl font-bold text-cosmic-gold mb-2">No Rankings Yet</h3>
-                    <p className="text-cosmic-silver">Be the first to claim victory!</p>
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    {leaderboard.map((player: User, index: number) => {
-                      const rank = index + 1;
-                      const winRate = player.wins && player.losses 
-                        ? Math.round((player.wins / (player.wins + player.losses)) * 100) 
-                        : 0;
-                      const isCurrentUser = user?.id === player.id;
-                      
-                      return (
-                        <div
-                          key={player.id}
-                          className={`flex items-center justify-between p-4 rounded-lg border-2 transition-all duration-200 ${
-                            isCurrentUser 
-                              ? 'bg-cosmic-gold/20 border-cosmic-gold' 
-                              : `bg-cosmic-700 ${getRankColor(rank)}`
-                          }`}
-                        >
-                          <div className="flex items-center space-x-4">
-                            <div className="text-2xl">{getRankEmoji(rank)}</div>
-                            <div className="text-2xl font-bold text-cosmic-gold">#{rank}</div>
-                            <div className="w-12 h-12 rounded-full border-2 border-cosmic-gold bg-cosmic-700 flex items-center justify-center">
-                              <span className="text-cosmic-gold">👨‍🚀</span>
-                            </div>
-                            <div>
-                              <div className={`font-bold ${isCurrentUser ? 'text-cosmic-gold' : 'text-cosmic-silver'}`}>
-                                {player.username || `Commander${player.id.slice(-4)}`}
-                                {isCurrentUser && <span className="ml-2 text-sm">(You)</span>}
-                              </div>
-                              <div className="text-sm text-cosmic-silver/70">
-                                Level {player.level || 1} • {player.experience || 0} XP
-                              </div>
-                            </div>
-                          </div>
+            ) : (
+              <div className="space-y-2">
+                {rankings.map((player: any, index: number) => {
+                  const rank = index + 1;
+                  const rankInfo = getRankIcon(rank);
+                  const isCurrentUser = player.id === user.id;
+                  
+                  return (
+                    <div 
+                      key={player.id} 
+                      className={`flex items-center justify-between p-4 rounded-lg transition-all duration-200 ${
+                        isCurrentUser 
+                          ? "bg-cosmic-gold/20 border border-cosmic-gold/50" 
+                          : "bg-space-black/30 hover:bg-space-black/50"
+                      }`}
+                    >
+                      <div className="flex items-center space-x-4">
+                        <div className="flex items-center space-x-3">
+                          <Badge variant={getRankBadge(rank)} className="w-12 h-8 flex items-center justify-center">
+                            <i className={`${rankInfo.icon} ${rankInfo.color} mr-1`}></i>
+                            {rank}
+                          </Badge>
                           
-                          <div className="flex items-center space-x-6 text-sm">
-                            <div className="text-center">
-                              <div className="font-bold text-green-400">{player.wins || 0}</div>
-                              <div className="text-cosmic-silver/70">Wins</div>
-                            </div>
-                            <div className="text-center">
-                              <div className="font-bold text-red-400">{player.losses || 0}</div>
-                              <div className="text-cosmic-silver/70">Losses</div>
-                            </div>
-                            <div className="text-center">
-                              <div className="font-bold text-cosmic-gold">{winRate}%</div>
-                              <div className="text-cosmic-silver/70">Win Rate</div>
-                            </div>
+                          <Avatar className="w-12 h-12">
+                            <AvatarImage src={player.profileImageUrl} />
+                            <AvatarFallback className="bg-cosmic-blue text-white">
+                              {player.username?.charAt(0) || "?"}
+                            </AvatarFallback>
+                          </Avatar>
+                        </div>
+                        
+                        <div>
+                          <div className="flex items-center space-x-2">
+                            <h3 className={`font-semibold ${isCurrentUser ? "text-cosmic-gold" : ""}`}>
+                              {player.username}
+                              {isCurrentUser && (
+                                <Badge variant="outline" className="ml-2 text-xs">You</Badge>
+                              )}
+                            </h3>
+                          </div>
+                          <div className="flex items-center space-x-4 text-sm text-foreground/70">
+                            <span>Level {player.level}</span>
+                            <span>•</span>
+                            <span>{player.wins} wins</span>
+                            <span>•</span>
+                            <span>{player.losses} losses</span>
                           </div>
                         </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-
-            {/* Ranking Information */}
-            <Card className="bg-cosmic-800/50 border border-cosmic-600 mt-8">
-              <CardContent className="p-6">
-                <h3 className="text-xl font-bold text-cosmic-gold mb-4">How Rankings Work</h3>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-cosmic-silver">
-                  <div className="text-center">
-                    <div className="text-3xl mb-2">⚡</div>
-                    <h4 className="font-semibold text-cosmic-gold mb-2">Win Games</h4>
-                    <p className="text-sm">Victory in battles earns you ranking points and experience</p>
-                  </div>
-                  <div className="text-center">
-                    <div className="text-3xl mb-2">📈</div>
-                    <h4 className="font-semibold text-cosmic-gold mb-2">Gain Experience</h4>
-                    <p className="text-sm">Level up your commander to unlock new abilities</p>
-                  </div>
-                  <div className="text-center">
-                    <div className="text-3xl mb-2">🏆</div>
-                    <h4 className="font-semibold text-cosmic-gold mb-2">Climb Ranks</h4>
-                    <p className="text-sm">Maintain your win rate to stay at the top</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-        </main>
-      </div>
+                      </div>
+                      
+                      <div className="text-right">
+                        <div className="text-lg font-bold text-green-400">
+                          {player.winRate}%
+                        </div>
+                        <div className="text-sm text-foreground/70">
+                          Win Rate
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </main>
     </div>
   );
 }

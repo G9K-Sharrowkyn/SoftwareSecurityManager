@@ -10,20 +10,13 @@ import GameRoom from "@/pages/GameRoom";
 import Collection from "@/pages/Collection";
 import DeckBuilder from "@/pages/DeckBuilder";
 import Profile from "@/pages/Profile";
+=======
+import Home from "@/pages/Home";
+import Game from "@/pages/Game";
 import NotFound from "@/pages/not-found";
-import Navigation from "@/components/layout/Navigation";
-import StarBackground from "@/components/layout/StarBackground";
 
 function Router() {
   const { isAuthenticated, isLoading } = useAuth();
-
-  if (isLoading) {
-    return (
-      <div className="min-h-screen bg-cosmic-900 flex items-center justify-center">
-        <div className="text-cosmic-gold text-xl">Loading...</div>
-      </div>
-    );
-  }
 
   return (
     <div className="min-h-screen bg-cosmic-900 text-cosmic-silver relative">
@@ -45,6 +38,18 @@ function Router() {
         <Route component={NotFound} />
       </Switch>
     </div>
+=======
+    <Switch>
+      {isLoading || !isAuthenticated ? (
+        <Route path="/" component={Landing} />
+      ) : (
+        <>
+          <Route path="/" component={Home} />
+          <Route path="/game/:id?" component={Game} />
+        </>
+      )}
+      <Route component={NotFound} />
+    </Switch>
   );
 }
 
