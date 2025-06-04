@@ -1,125 +1,72 @@
-import { useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import { isUnauthorizedError } from "@/lib/authUtils";
-import Navigation from "@/components/ui/navigation";
-import StarBackground from "@/components/game/StarBackground";
-import BoosterAnimation from "@/components/game/BoosterAnimation";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { apiRequest } from "@/lib/queryClient";
-
-interface Card {
-  id: number;
-  name: string;
-  type: string[];
-  attack: number;
-  defense: number;
-  commandCost: number;
-  specialAbility: string;
-  rarity: string;
-  imageUrl: string;
-}
-
-interface UserCard {
-  id: number;
-  quantity: number;
-  card: Card;
-}
-
-interface BoosterPack {
-  id: number;
-  packType: string;
-  isOpened: boolean;
-}
+import StarBackground from "@/components/StarBackground";
+import CardComponent from "@/components/CardComponent";
+import BoosterPack from "@/components/BoosterPack";
+import { Link } from "wouter";
 
 export default function Collection() {
-  const { user, isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading } = useAuth();
   const { toast } = useToast();
-  const queryClient = useQueryClient();
   const [searchTerm, setSearchTerm] = useState("");
-  const [selectedRarity, setSelectedRarity] = useState("All");
-  const [selectedType, setSelectedType] = useState("All");
-  const [selectedCard, setSelectedCard] = useState<Card | null>(null);
+  const [filterType, setFilterType] = useState("all");
   const [showBoosterModal, setShowBoosterModal] = useState(false);
-  const [revealedCards, setRevealedCards] = useState<Card[]>([]);
-  const [particlesVisible, setParticlesVisible] = useState(false);
 
-  // Fetch user collection
-  const { data: userCards = [], isLoading: collectionLoading } = useQuery({
-    queryKey: ["/api/collection"],
-    enabled: isAuthenticated,
-    retry: false,
-  });
-
-  // Fetch booster packs
-  const { data: boosterPacks = [], isLoading: packsLoading } = useQuery({
-    queryKey: ["/api/booster-packs"],
-    enabled: isAuthenticated,
-    retry: false,
-  });
-
-  // Buy booster pack mutation
-  const buyBoosterMutation = useMutation({
-    mutationFn: async () => {
-      const response = await apiRequest("POST", "/api/booster-packs");
-      return response.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/booster-packs"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
+  // Redirect to login if not authenticated
+  useEffect(() => {
+    if (!isLoading && !isAuthenticated) {
       toast({
-        title: "Booster Pack Purchased",
-        description: "New booster pack added to your collection!",
-      });
-    },
-    onError: (error) => {
-      if (isUnauthorizedError(error)) {
-        toast({
-          title: "Unauthorized",
-          description: "You are logged out. Logging in again...",
-          variant: "destructive",
-        });
-        setTimeout(() => {
-          window.location.href = "/api/login";
-        }, 500);
-        return;
-      }
-      toast({
-        title: "Error",
-        description: "Failed to purchase booster pack. Check your credits.",
+        title: "Unauthorized",
+        description: "You are logged out. Logging in again...",
         variant: "destructive",
       });
-    },
-  });
-
-  // Open booster pack mutation
-  const openBoosterMutation = useMutation({
-    mutationFn: async (packId: number) => {
-      const response = await apiRequest("POST", `/api/booster-packs/${packId}/open`);
-      return response.json();
-    },
-    onSuccess: (result) => {
-      setRevealedCards(result.cards);
-      setParticlesVisible(true);
-      queryClient.invalidateQueries({ queryKey: ["/api/booster-packs"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/collection"] });
-      
       setTimeout(() => {
-        setParticlesVisible(false);
-      }, 2000);
+        window.location.href = "/api/login";
+      }, 500);
+      return;
+    }
+  }, [isAuthenticated, isLoading, toast]);
 
-      toast({
-        title: "Booster Pack Opened!",
-        description: `Revealed ${result.cards.length} new cards!`,
+  const { data: collection, isLoading: collectionLoading, error, refetch } = useQuery({
+    queryKey: ['/api/collection'],
+    enabled: isAuthenticated,
+    retry: false,
+  });
+
+  const { data: boosterPacks } = useQuery({
+    queryKey: ['/api/boosters'],
+    enabled: isAuthenticated,
+    retry: false,
+  });
+
+  const handleCreateBoosterPack = async () => {
+    try {
+      const response = await fetch('/api/boosters', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
       });
-    },
-    onError: (error) => {
-      if (isUnauthorizedError(error)) {
+
+      if (response.ok) {
+        refetch();
+        toast({
+          title: "Success",
+          description: "Booster pack created! Open it to reveal cards.",
+        });
+      } else {
+        throw new Error('Failed to create booster pack');
+      }
+    } catch (error) {
+      if (error instanceof Error && isUnauthorizedError(error)) {
         toast({
           title: "Unauthorized",
           description: "You are logged out. Logging in again...",
@@ -132,388 +79,196 @@ export default function Collection() {
       }
       toast({
         title: "Error",
-        description: "Failed to open booster pack",
+        description: "Failed to create booster pack. Please try again.",
         variant: "destructive",
       });
-    },
-  });
-
-  // Filter cards
-  const filteredCards = userCards.filter((userCard: UserCard) => {
-    const card = userCard.card;
-    const matchesSearch = card.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         card.specialAbility?.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesRarity = selectedRarity === "All" || card.rarity === selectedRarity;
-    const matchesType = selectedType === "All" || card.type.includes(selectedType);
-    
-    return matchesSearch && matchesRarity && matchesType;
-  });
-
-  const handleOpenBooster = (packId: number) => {
-    setShowBoosterModal(true);
-    openBoosterMutation.mutate(packId);
-  };
-
-  const handleCloseBoosterModal = () => {
-    setShowBoosterModal(false);
-    setRevealedCards([]);
-  };
-
-  const getRarityColor = (rarity: string) => {
-    switch (rarity) {
-      case "Common": return "text-gray-400 border-gray-400/30";
-      case "Uncommon": return "text-green-400 border-green-400/30";
-      case "Rare": return "text-blue-400 border-blue-400/30";
-      case "Legendary": return "text-purple-400 border-purple-400/30";
-      default: return "text-gray-400 border-gray-400/30";
     }
   };
 
-  if (isLoading) {
+  if (isLoading || collectionLoading) {
     return (
-      <div className="min-h-screen bg-space-black text-star-silver flex items-center justify-center">
-        <div className="text-center">
-          <div className="w-16 h-16 border-4 border-mystic-gold border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-          <div className="text-mystic-gold font-semibold">Loading collection...</div>
+      <div className="min-h-screen bg-cosmic-black flex items-center justify-center">
+        <StarBackground />
+        <div className="relative z-10 text-cosmic-gold text-xl">
+          <i className="fas fa-spinner fa-spin mr-2"></i>
+          Loading collection...
         </div>
       </div>
     );
   }
 
+  if (error) {
+    if (error instanceof Error && isUnauthorizedError(error)) {
+      toast({
+        title: "Unauthorized",
+        description: "You are logged out. Logging in again...",
+        variant: "destructive",
+      });
+      setTimeout(() => {
+        window.location.href = "/api/login";
+      }, 500);
+      return null;
+    }
+  }
+
+  const filteredCollection = collection?.filter((item: any) => {
+    const matchesSearch = item.card.name.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesType = filterType === "all" || item.card.type.toLowerCase() === filterType.toLowerCase();
+    return matchesSearch && matchesType;
+  }) || [];
+
   return (
-    <div className="min-h-screen starfield-background">
+    <div className="min-h-screen relative overflow-hidden bg-cosmic-black text-cosmic-silver">
       <StarBackground />
-      <Navigation />
       
-      <main className="relative z-10 pt-6">
+      {/* Navigation Header */}
+      <nav className="relative z-50 bg-cosmic-blue/90 backdrop-blur-md border-b border-cosmic-gold/30">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          
-          {/* Header */}
-          <div className="text-center mb-8">
-            <h1 className="text-4xl md:text-6xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-mystic-gold to-amber mb-4 animate-glow">
-              Card Collection
-            </h1>
-            <p className="text-lg text-star-silver">
-              Total Cards: <span className="text-mystic-gold font-semibold">{userCards.length}</span>
-            </p>
+          <div className="flex justify-between items-center h-16">
+            <div className="flex items-center space-x-4">
+              <Link href="/" className="flex items-center space-x-2">
+                <i className="fas fa-rocket text-cosmic-gold text-2xl"></i>
+                <span className="text-xl font-bold text-cosmic-gold">Proteus Nebula</span>
+              </Link>
+            </div>
+            
+            <div className="flex items-center space-x-6">
+              <Link href="/" className="text-cosmic-silver hover:text-cosmic-gold transition-colors duration-200 font-medium">
+                <i className="fas fa-home mr-2"></i>Dashboard
+              </Link>
+              <Link href="/collection" className="text-cosmic-gold font-medium">
+                <i className="fas fa-layer-group mr-2"></i>Collection
+              </Link>
+              <Link href="/deck-builder" className="text-cosmic-silver hover:text-cosmic-gold transition-colors duration-200 font-medium">
+                <i className="fas fa-cogs mr-2"></i>Deck Builder
+              </Link>
+            </div>
           </div>
+        </div>
+      </nav>
 
-          {/* Stats and Actions */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-            <Card className="card-cosmic">
-              <CardContent className="p-6 text-center">
-                <div className="text-3xl font-bold text-mystic-gold mb-2">
-                  {userCards.reduce((total: number, userCard: UserCard) => total + userCard.quantity, 0)}
-                </div>
-                <div className="text-star-silver">Total Cards Owned</div>
-              </CardContent>
-            </Card>
+      {/* Main Content */}
+      <main className="relative z-10 max-w-7xl mx-auto px-4 py-6">
+        <div className="mb-8">
+          <h1 className="text-4xl font-bold text-cosmic-gold mb-4">
+            <i className="fas fa-layer-group mr-3"></i>
+            Card Collection
+          </h1>
+          <p className="text-cosmic-silver/80">
+            Manage your card collection and open booster packs to discover new cards.
+          </p>
+        </div>
 
-            <Card className="card-cosmic">
-              <CardContent className="p-6 text-center">
-                <div className="text-3xl font-bold text-purple-400 mb-2">
-                  {userCards.filter((userCard: UserCard) => userCard.card.rarity === "Legendary").length}
-                </div>
-                <div className="text-star-silver">Legendary Cards</div>
-              </CardContent>
-            </Card>
-
-            <Card className="card-cosmic">
-              <CardContent className="p-6 text-center">
-                <div className="text-3xl font-bold text-green-400 mb-2">
-                  {user?.credits || 0}
-                </div>
-                <div className="text-star-silver">Credits Available</div>
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* Booster Packs Section */}
-          <div className="mb-12">
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-2xl font-bold text-mystic-gold">Booster Packs</h2>
-              <Button 
-                onClick={() => buyBoosterMutation.mutate()}
-                disabled={buyBoosterMutation.isPending || (user?.credits || 0) < 100}
-                className="button-cosmic"
+        {/* Booster Packs Section */}
+        <Card className="bg-cosmic-blue/20 border-cosmic-gold/30 mb-8">
+          <CardHeader>
+            <CardTitle className="text-cosmic-gold flex items-center">
+              <i className="fas fa-gift mr-2"></i>
+              Booster Packs
+            </CardTitle>
+            <CardDescription>
+              Open booster packs to add new cards to your collection
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-center justify-between mb-4">
+              <div className="text-cosmic-silver">
+                Available Packs: <span className="text-cosmic-gold font-semibold">
+                  {boosterPacks?.filter((pack: any) => !pack.isOpened).length || 0}
+                </span>
+              </div>
+              <Button
+                onClick={handleCreateBoosterPack}
+                className="bg-cosmic-gold hover:bg-cosmic-gold/80 text-cosmic-black"
               >
-                {buyBoosterMutation.isPending ? (
-                  <>
-                    <div className="w-4 h-4 border-2 border-space-black border-t-transparent rounded-full animate-spin mr-2"></div>
-                    Purchasing...
-                  </>
-                ) : (
-                  <>
-                    <i className="fas fa-shopping-cart mr-2"></i>
-                    Buy Pack (100 Credits)
-                  </>
-                )}
+                <i className="fas fa-plus mr-2"></i>
+                Get Booster Pack
               </Button>
             </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-              {boosterPacks
-                .filter((pack: BoosterPack) => !pack.isOpened)
-                .map((pack: BoosterPack) => (
-                  <Card key={pack.id} className="card-cosmic cursor-pointer hover:scale-105 transition-all duration-300" onClick={() => handleOpenBooster(pack.id)}>
-                    <CardContent className="p-6 text-center">
-                      <div className="w-20 h-28 bg-gradient-to-br from-mystic-gold to-amber rounded-lg mx-auto mb-4 flex items-center justify-center border-2 border-mystic-gold animate-pulse-gold">
-                        <i className="fas fa-gift text-space-black text-2xl"></i>
-                      </div>
-                      <div className="text-mystic-gold font-semibold">{pack.packType} Pack</div>
-                      <div className="text-star-silver/70 text-sm">Click to open!</div>
-                    </CardContent>
-                  </Card>
-                ))}
-            </div>
-
-            {boosterPacks.filter((pack: BoosterPack) => !pack.isOpened).length === 0 && (
-              <div className="text-center py-12">
-                <i className="fas fa-gift text-6xl text-star-silver/30 mb-4"></i>
-                <p className="text-star-silver/70">No unopened booster packs. Purchase one to get started!</p>
-              </div>
-            )}
-          </div>
-
-          {/* Filters */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
-            <Input
-              placeholder="Search cards..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="bg-cosmic-blue/30 border-mystic-gold/30 text-star-silver placeholder-star-silver/50"
-            />
             
-            <Select value={selectedRarity} onValueChange={setSelectedRarity}>
-              <SelectTrigger className="bg-cosmic-blue/30 border-mystic-gold/30 text-star-silver">
-                <SelectValue placeholder="All Rarities" />
-              </SelectTrigger>
-              <SelectContent className="bg-cosmic-blue border-mystic-gold/30">
-                <SelectItem value="All">All Rarities</SelectItem>
-                <SelectItem value="Common">Common</SelectItem>
-                <SelectItem value="Uncommon">Uncommon</SelectItem>
-                <SelectItem value="Rare">Rare</SelectItem>
-                <SelectItem value="Legendary">Legendary</SelectItem>
-              </SelectContent>
-            </Select>
-
-            <Select value={selectedType} onValueChange={setSelectedType}>
-              <SelectTrigger className="bg-cosmic-blue/30 border-mystic-gold/30 text-star-silver">
-                <SelectValue placeholder="All Types" />
-              </SelectTrigger>
-              <SelectContent className="bg-cosmic-blue border-mystic-gold/30">
-                <SelectItem value="All">All Types</SelectItem>
-                <SelectItem value="Shipyard">Shipyard</SelectItem>
-                <SelectItem value="Biological">Biological</SelectItem>
-                <SelectItem value="Machine">Machine</SelectItem>
-                <SelectItem value="BloodThirsty">BloodThirsty</SelectItem>
-              </SelectContent>
-            </Select>
-
-            <div className="text-star-silver flex items-center justify-center">
-              Showing {filteredCards.length} cards
+            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
+              {boosterPacks?.filter((pack: any) => !pack.isOpened).map((pack: any) => (
+                <BoosterPack 
+                  key={pack.id} 
+                  pack={pack} 
+                  onOpen={() => refetch()} 
+                />
+              ))}
             </div>
-          </div>
+          </CardContent>
+        </Card>
 
-          {/* Cards Grid */}
-          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-6">
-            {filteredCards.map((userCard: UserCard) => (
-              <Card 
-                key={userCard.id} 
-                className={`card-cosmic cursor-pointer hover:scale-105 transition-all duration-300 ${getRarityColor(userCard.card.rarity)}`}
-                onClick={() => setSelectedCard(userCard.card)}
-              >
-                <CardContent className="p-4">
-                  <div className="aspect-[3/4] bg-cosmic-blue/50 rounded-lg mb-3 overflow-hidden">
-                    {userCard.card.imageUrl ? (
-                      <img 
-                        src={userCard.card.imageUrl} 
-                        alt={userCard.card.name}
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center">
-                        <i className="fas fa-image text-star-silver/30 text-2xl"></i>
+        {/* Collection Filters */}
+        <Card className="bg-cosmic-blue/20 border-cosmic-gold/30 mb-8">
+          <CardContent className="pt-6">
+            <div className="flex flex-col md:flex-row gap-4">
+              <div className="flex-1">
+                <Input
+                  placeholder="Search cards..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="bg-cosmic-black/50 border-cosmic-gold/30 text-cosmic-silver placeholder-cosmic-silver/50 focus:border-cosmic-gold"
+                />
+              </div>
+              <Select value={filterType} onValueChange={setFilterType}>
+                <SelectTrigger className="w-full md:w-48 bg-cosmic-black/50 border-cosmic-gold/30 text-cosmic-silver">
+                  <SelectValue placeholder="Filter by type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Types</SelectItem>
+                  <SelectItem value="unit">Units</SelectItem>
+                  <SelectItem value="command">Commands</SelectItem>
+                  <SelectItem value="shipyard">Shipyards</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Collection Grid */}
+        <Card className="bg-cosmic-blue/20 border-cosmic-gold/30">
+          <CardHeader>
+            <CardTitle className="text-cosmic-gold">
+              Your Cards ({filteredCollection.length})
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {filteredCollection.length === 0 ? (
+              <div className="text-center py-12">
+                <i className="fas fa-inbox text-cosmic-silver/50 text-6xl mb-4"></i>
+                <h3 className="text-xl font-semibold text-cosmic-silver mb-2">No Cards Found</h3>
+                <p className="text-cosmic-silver/70 mb-4">
+                  {searchTerm || filterType !== "all" 
+                    ? "Try adjusting your search or filters." 
+                    : "Open some booster packs to start your collection!"}
+                </p>
+                {!searchTerm && filterType === "all" && (
+                  <Button
+                    onClick={handleCreateBoosterPack}
+                    className="bg-cosmic-gold hover:bg-cosmic-gold/80 text-cosmic-black"
+                  >
+                    <i className="fas fa-gift mr-2"></i>
+                    Get Your First Pack
+                  </Button>
+                )}
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
+                {filteredCollection.map((item: any) => (
+                  <div key={`${item.cardId}-${item.playerId}`} className="relative">
+                    <CardComponent card={item.card} />
+                    {item.quantity > 1 && (
+                      <div className="absolute top-2 right-2 bg-cosmic-gold text-cosmic-black rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold">
+                        {item.quantity}
                       </div>
                     )}
                   </div>
-                  
-                  <div className="text-xs font-semibold text-mystic-gold mb-1 truncate">
-                    {userCard.card.name.replace(/_/g, ' ')}
-                  </div>
-                  
-                  <div className="text-xs text-star-silver/70 mb-2">
-                    {userCard.card.type.join(', ')}
-                  </div>
-                  
-                  {userCard.card.attack > 0 || userCard.card.defense > 0 ? (
-                    <div className="flex justify-between text-xs">
-                      <span className="text-red-400">ATK: {userCard.card.attack}</span>
-                      <span className="text-blue-400">DEF: {userCard.card.defense}</span>
-                    </div>
-                  ) : (
-                    <div className="text-xs text-center text-mystic-gold">
-                      {userCard.card.type.includes("Shipyard") ? "Command" : "Special"}
-                    </div>
-                  )}
-                  
-                  <div className="mt-2 text-center">
-                    <span className="text-xs bg-mystic-gold/20 text-mystic-gold px-2 py-1 rounded">
-                      x{userCard.quantity}
-                    </span>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-
-          {filteredCards.length === 0 && (
-            <div className="text-center py-12">
-              <i className="fas fa-search text-6xl text-star-silver/30 mb-4"></i>
-              <p className="text-star-silver/70">No cards found matching your search criteria.</p>
-            </div>
-          )}
-        </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
       </main>
-
-      {/* Card Detail Modal */}
-      <Dialog open={selectedCard !== null} onOpenChange={() => setSelectedCard(null)}>
-        <DialogContent className="max-w-2xl cosmic-gradient border border-mystic-gold/30">
-          {selectedCard && (
-            <>
-              <DialogHeader>
-                <DialogTitle className="text-2xl font-bold text-mystic-gold text-center">
-                  {selectedCard.name.replace(/_/g, ' ')}
-                </DialogTitle>
-              </DialogHeader>
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="aspect-[3/4] bg-cosmic-blue/50 rounded-lg overflow-hidden">
-                  {selectedCard.imageUrl ? (
-                    <img 
-                      src={selectedCard.imageUrl} 
-                      alt={selectedCard.name}
-                      className="w-full h-full object-cover"
-                    />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center">
-                      <i className="fas fa-image text-star-silver/30 text-4xl"></i>
-                    </div>
-                  )}
-                </div>
-                
-                <div className="space-y-4">
-                  <div>
-                    <h4 className="font-semibold text-mystic-gold mb-2">Type</h4>
-                    <p className="text-star-silver">{selectedCard.type.join(', ')}</p>
-                  </div>
-                  
-                  <div className="grid grid-cols-3 gap-4">
-                    <div className="text-center">
-                      <div className="text-xs text-star-silver/70">Cost</div>
-                      <div className="text-mystic-gold font-bold">{selectedCard.commandCost}</div>
-                    </div>
-                    <div className="text-center">
-                      <div className="text-xs text-star-silver/70">Attack</div>
-                      <div className="text-red-400 font-bold">{selectedCard.attack}</div>
-                    </div>
-                    <div className="text-center">
-                      <div className="text-xs text-star-silver/70">Defense</div>
-                      <div className="text-blue-400 font-bold">{selectedCard.defense}</div>
-                    </div>
-                  </div>
-                  
-                  <div>
-                    <h4 className="font-semibold text-mystic-gold mb-2">Special Ability</h4>
-                    <p className="text-star-silver text-sm bg-space-black/30 p-3 rounded">
-                      {selectedCard.specialAbility || "No special ability"}
-                    </p>
-                  </div>
-                  
-                  <div>
-                    <h4 className="font-semibold text-mystic-gold mb-2">Rarity</h4>
-                    <span className={`px-3 py-1 rounded text-sm ${getRarityColor(selectedCard.rarity)}`}>
-                      {selectedCard.rarity}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </>
-          )}
-        </DialogContent>
-      </Dialog>
-
-      {/* Booster Opening Modal */}
-      <Dialog open={showBoosterModal} onOpenChange={handleCloseBoosterModal}>
-        <DialogContent className="max-w-4xl cosmic-gradient border border-mystic-gold/30">
-          <DialogHeader>
-            <DialogTitle className="text-3xl font-bold text-mystic-gold text-center mb-4">
-              <i className="fas fa-gift mr-3"></i>
-              Booster Pack Opening
-            </DialogTitle>
-          </DialogHeader>
-          
-          {openBoosterMutation.isPending ? (
-            <div className="text-center py-12">
-              <div className="w-20 h-28 bg-gradient-to-br from-mystic-gold to-amber rounded-lg mx-auto mb-4 flex items-center justify-center border-2 border-mystic-gold animate-pulse-gold">
-                <i className="fas fa-gift text-space-black text-3xl"></i>
-              </div>
-              <p className="text-star-silver">Opening booster pack...</p>
-            </div>
-          ) : (
-            <>
-              {revealedCards.length > 0 && (
-                <>
-                  <div className="text-center mb-6">
-                    <h3 className="text-xl font-bold text-mystic-gold mb-2">Cards Revealed!</h3>
-                    <p className="text-star-silver/70">These cards have been added to your collection</p>
-                  </div>
-                  
-                  <div className="grid grid-cols-5 gap-4 mb-6">
-                    {revealedCards.map((card, index) => (
-                      <Card key={index} className={`card-cosmic animate-card-hover ${getRarityColor(card.rarity)}`} style={{ animationDelay: `${index * 200}ms` }}>
-                        <CardContent className="p-3">
-                          <div className="aspect-[3/4] bg-cosmic-blue/50 rounded mb-2 overflow-hidden">
-                            {card.imageUrl ? (
-                              <img 
-                                src={card.imageUrl} 
-                                alt={card.name}
-                                className="w-full h-full object-cover"
-                              />
-                            ) : (
-                              <div className="w-full h-full flex items-center justify-center">
-                                <i className="fas fa-image text-star-silver/30"></i>
-                              </div>
-                            )}
-                          </div>
-                          <div className="text-xs text-mystic-gold font-semibold truncate">
-                            {card.name.replace(/_/g, ' ')}
-                          </div>
-                          <div className="text-xs text-center mt-1">
-                            <span className={`${getRarityColor(card.rarity)}`}>
-                              {card.rarity}
-                            </span>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    ))}
-                  </div>
-                  
-                  <div className="text-center">
-                    <Button onClick={handleCloseBoosterModal} className="button-cosmic">
-                      <i className="fas fa-check mr-2"></i>
-                      Continue
-                    </Button>
-                  </div>
-                </>
-              )}
-            </>
-          )}
-        </DialogContent>
-      </Dialog>
-
-      {/* Particle Effect */}
-      {particlesVisible && <BoosterAnimation visible={particlesVisible} />}
     </div>
   );
 }

@@ -1,180 +1,94 @@
-import { Card, CardContent } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 
 interface CardComponentProps {
-  card: {
-    id?: number;
-    name: string;
-    type: string;
-    cost: number;
-    attack?: number;
-    defense?: number;
-    rarity?: string;
-    specialAbility?: string;
-  };
-  compact?: boolean;
-  showDetails?: boolean;
-  onClick?: () => void;
+  card: any;
+  size?: "small" | "medium" | "large";
+  onClick?: (e?: React.MouseEvent) => void;
+  selected?: boolean;
+  className?: string;
 }
 
 export default function CardComponent({ 
   card, 
-  compact = false, 
-  showDetails = true, 
-  onClick 
+  size = "medium", 
+  onClick, 
+  selected = false,
+  className 
 }: CardComponentProps) {
-  const getRarityColor = (rarity?: string) => {
-    switch (rarity) {
-      case "Common":
-        return "border-gray-400";
-      case "Uncommon":
-        return "border-green-400";
-      case "Rare":
-        return "border-blue-400";
-      case "Legendary":
-        return "border-purple-400";
-      default:
-        return "border-gray-500";
-    }
+  const sizeClasses = {
+    small: "w-20 h-28",
+    medium: "w-24 h-36",
+    large: "w-32 h-48"
   };
 
-  const getTypeColor = (type: string) => {
-    switch (type) {
-      case "Unit":
-        return "text-blue-400";
-      case "Command":
-        return "text-green-400";
-      case "Shipyard":
-        return "text-purple-400";
-      default:
-        return "text-gray-400";
-    }
+  const handleClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onClick?.(e);
   };
-
-  const getTypeIcon = (type: string) => {
-    switch (type) {
-      case "Unit":
-        return "fas fa-rocket";
-      case "Command":
-        return "fas fa-bolt";
-      case "Shipyard":
-        return "fas fa-industry";
-      default:
-        return "fas fa-star";
-    }
-  };
-
-  if (compact) {
-    return (
-      <Card 
-        className={`bg-gradient-to-br from-gray-800 to-gray-900 border-2 ${getRarityColor(card.rarity)} hover:border-yellow-400 transition-all cursor-pointer ${compact ? 'w-24 h-36' : 'w-32 h-48'}`}
-        onClick={onClick}
-      >
-        <CardContent className="p-2 h-full flex flex-col">
-          {/* Card Header */}
-          <div className="flex items-center justify-between mb-1">
-            <div className="bg-yellow-400 text-black rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold">
-              {card.cost}
-            </div>
-            <i className={`${getTypeIcon(card.type)} ${getTypeColor(card.type)} text-sm`}></i>
-          </div>
-
-          {/* Card Art */}
-          <div className="flex-1 bg-gray-700 rounded mb-2 flex items-center justify-center">
-            <i className={`${getTypeIcon(card.type)} text-gray-500 text-2xl`}></i>
-          </div>
-
-          {/* Card Name */}
-          <div className="text-yellow-400 font-semibold text-xs text-center mb-1 leading-tight">
-            {card.name}
-          </div>
-
-          {/* Stats */}
-          {(card.attack !== undefined || card.defense !== undefined) && (
-            <div className="flex justify-between text-xs">
-              {card.attack !== undefined && (
-                <span className="text-red-400 font-bold">{card.attack}</span>
-              )}
-              {card.defense !== undefined && (
-                <span className="text-blue-400 font-bold">{card.defense}</span>
-              )}
-            </div>
-          )}
-
-          {/* Type indicator for non-units */}
-          {card.type !== "Unit" && (
-            <div className={`text-center text-xs ${getTypeColor(card.type)} font-semibold`}>
-              {card.type}
-            </div>
-          )}
-        </CardContent>
-      </Card>
-    );
-  }
 
   return (
-    <Card 
-      className={`bg-gradient-to-br from-gray-800 to-gray-900 border-2 ${getRarityColor(card.rarity)} hover:border-yellow-400 transition-all cursor-pointer w-64 h-96`}
-      onClick={onClick}
+    <div 
+      className={cn(
+        "relative cursor-pointer transition-all duration-300 transform hover:scale-110 hover:-translate-y-2",
+        sizeClasses[size],
+        selected && "ring-2 ring-primary scale-105",
+        onClick && "hover:shadow-2xl",
+        className
+      )}
+      onClick={handleClick}
     >
-      <CardContent className="p-4 h-full flex flex-col">
-        {/* Card Header */}
-        <div className="flex items-center justify-between mb-3">
-          <div className="bg-yellow-400 text-black rounded-full w-8 h-8 flex items-center justify-center text-sm font-bold">
-            {card.cost}
-          </div>
-          <div className={`${getTypeColor(card.type)} font-semibold text-sm`}>
-            <i className={`${getTypeIcon(card.type)} mr-1`}></i>
-            {card.type}
-          </div>
-        </div>
-
-        {/* Card Name */}
-        <h3 className="text-yellow-400 font-bold text-lg mb-3 text-center">
-          {card.name}
-        </h3>
-
-        {/* Card Art */}
-        <div className="flex-1 bg-gray-700 rounded-lg mb-4 flex items-center justify-center">
-          <i className={`${getTypeIcon(card.type)} text-gray-500 text-6xl`}></i>
-        </div>
-
-        {/* Special Ability */}
-        {showDetails && card.specialAbility && (
-          <div className="mb-4">
-            <div className="text-xs text-gray-400 mb-1">Special Ability:</div>
-            <div className="text-sm text-gray-300 italic bg-gray-800/50 p-2 rounded">
-              "{card.specialAbility}"
+      <div className="relative w-full h-full bg-gradient-to-br from-card to-background rounded-lg border-2 border-primary/50 shadow-lg overflow-hidden">
+        
+        {/* Card Image */}
+        <div className="w-full h-2/3 bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center">
+          {card.imageUrl ? (
+            <img 
+              src={card.imageUrl} 
+              alt={card.name} 
+              className="w-full h-full object-cover"
+            />
+          ) : (
+            <div className="text-primary/50 text-center">
+              <i className="fas fa-image text-2xl mb-1 block"></i>
+              <div className="text-xs">{card.name}</div>
             </div>
-          </div>
+          )}
+        </div>
+
+        {/* Card Info */}
+        <div className="absolute top-1 left-1 right-1 bg-background/90 rounded text-xs text-center p-1">
+          <div className="text-primary font-semibold truncate">{card.name}</div>
+        </div>
+
+        {/* Card Stats */}
+        <div className="absolute bottom-1 left-1 right-1 bg-background/90 rounded text-xs">
+          {card.type?.includes("Shipyard") ? (
+            <div className="flex justify-center items-center text-accent px-1">
+              <span>Shipyard</span>
+            </div>
+          ) : (
+            <div className="flex justify-between items-center text-foreground px-1">
+              <span className="text-red-400">{card.attack || 0}</span>
+              <span className="text-accent">{card.commandCost || 0}</span>
+              <span className="text-blue-400">{card.defense || 0}</span>
+            </div>
+          )}
+        </div>
+
+        {/* Rarity indicator */}
+        {card.rarity && (
+          <div className={cn(
+            "absolute top-1 right-1 w-2 h-2 rounded-full",
+            card.rarity === "legendary" && "bg-purple-500",
+            card.rarity === "rare" && "bg-blue-500", 
+            card.rarity === "uncommon" && "bg-green-500",
+            card.rarity === "common" && "bg-gray-500"
+          )} />
         )}
 
-        {/* Stats */}
-        {(card.attack !== undefined || card.defense !== undefined) && (
-          <div className="flex justify-around bg-gray-800/50 rounded-lg p-2">
-            {card.attack !== undefined && (
-              <div className="text-center">
-                <div className="text-xs text-gray-400">Attack</div>
-                <div className="text-red-400 font-bold text-xl">{card.attack}</div>
-              </div>
-            )}
-            {card.defense !== undefined && (
-              <div className="text-center">
-                <div className="text-xs text-gray-400">Defense</div>
-                <div className="text-blue-400 font-bold text-xl">{card.defense}</div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Rarity */}
-        {showDetails && card.rarity && (
-          <div className="text-center mt-2">
-            <span className={`text-xs px-2 py-1 rounded ${getRarityColor(card.rarity)} border`}>
-              {card.rarity}
-            </span>
-          </div>
-        )}
-      </CardContent>
-    </Card>
+        {/* Shimmer effect */}
+        <div className="absolute inset-0 bg-gradient-to-r from-transparent via-primary/20 to-transparent -translate-x-full hover:translate-x-full transition-transform duration-1000 ease-in-out" />
+      </div>
+    </div>
   );
 }

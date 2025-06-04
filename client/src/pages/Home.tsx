@@ -1,19 +1,21 @@
 import { useEffect } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/useAuth";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { apiRequest, queryClient } from "@/lib/queryClient";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import StarBackground from "@/components/StarBackground";
+import BoosterPack from "@/components/BoosterPack";
+import DeckBuilder from "@/components/DeckBuilder";
 import { isUnauthorizedError } from "@/lib/authUtils";
-import Navigation from "@/components/ui/Navigation";
-import { Sword, Users, Gift, Trophy, Play, Layers, Star } from "lucide-react";
-import { Link } from "wouter";
+import { useLocation } from "wouter";
 
 export default function Home() {
   const { user, isAuthenticated, isLoading } = useAuth();
   const { toast } = useToast();
-  const queryClient = useQueryClient();
+  const [, setLocation] = useLocation();
 
   // Redirect to home if not authenticated
   useEffect(() => {
@@ -30,71 +32,28 @@ export default function Home() {
     }
   }, [isAuthenticated, isLoading, toast]);
 
-  // Initialize game data
-  const initDataMutation = useMutation({
-    mutationFn: async () => {
-      await apiRequest("POST", "/api/init-data");
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/cards"] });
-      toast({
-        title: "Success",
-        description: "Game data initialized successfully!",
-      });
-    },
-    onError: (error) => {
-      if (isUnauthorizedError(error)) {
-        toast({
-          title: "Unauthorized",
-          description: "You are logged out. Logging in again...",
-          variant: "destructive",
-        });
-        setTimeout(() => {
-          window.location.href = "/api/login";
-        }, 500);
-        return;
-      }
-      console.error("Error initializing data:", error);
-    },
+  const { data: collection } = useQuery({
+    queryKey: ["/api/collection"],
+    enabled: isAuthenticated,
   });
 
-  // Fetch user's games
-  const { data: userGames } = useQuery({
-    queryKey: [`/api/users/${user?.id}/games`],
-    enabled: !!user?.id,
+  const { data: decks } = useQuery({
+    queryKey: ["/api/decks"],
+    enabled: isAuthenticated,
   });
 
-  // Fetch user's decks
-  const { data: userDecks } = useQuery({
-    queryKey: [`/api/users/${user?.id}/decks`],
-    enabled: !!user?.id,
-  });
-
-  // Fetch user's booster packs
   const { data: boosterPacks } = useQuery({
-    queryKey: [`/api/users/${user?.id}/boosters`],
-    enabled: !!user?.id,
+    queryKey: ["/api/booster-packs"],
+    enabled: isAuthenticated,
   });
 
-  // Create AI game
-  const createAiGameMutation = useMutation({
-    mutationFn: async (difficulty: string) => {
-      const response = await apiRequest("POST", "/api/games", {
-        isAiGame: true,
-        aiDifficulty: difficulty,
-        status: "active",
-        currentPhase: "Command",
-        gameState: {
-          player1Health: 100,
-          player2Health: 100,
-          commandPoints: { player1: 0, player2: 0 },
-          turnNumber: 1,
-        },
-      });
+  const createGameMutation = useMutation({
+    mutationFn: async (gameData: { isAI: boolean; aiDifficulty?: string }) => {
+      const response = await apiRequest("POST", "/api/games", gameData);
       return response.json();
     },
     onSuccess: (game) => {
-      window.location.href = `/game/${game.id}`;
+      setLocation(`/game/${game.id}`);
     },
     onError: (error) => {
       if (isUnauthorizedError(error)) {
@@ -110,199 +69,235 @@ export default function Home() {
       }
       toast({
         title: "Error",
-        description: "Failed to create game. Please try again.",
+        description: "Failed to create game",
         variant: "destructive",
       });
     },
   });
 
+  const handleStartGame = (aiDifficulty: string) => {
+    createGameMutation.mutate({ isAI: true, aiDifficulty });
+  };
+
+  const handleLogout = () => {
+    window.location.href = "/api/logout";
+  };
+
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <Star className="h-12 w-12 text-mystic-gold animate-spin mx-auto mb-4" />
-          <p className="text-star-silver">Loading your command center...</p>
-        </div>
+        <div className="text-primary">Loading...</div>
       </div>
     );
   }
 
-  if (!user) return null;
-
   return (
-    <div className="min-h-screen relative z-10">
-      <Navigation />
+    <div className="min-h-screen relative">
+      <StarBackground />
       
-      <main className="max-w-7xl mx-auto px-4 py-8">
-        {/* Welcome Section */}
+      {/* Navigation Header */}
+      <nav className="relative z-50 bg-gradient-to-r from-background/80 via-card/80 to-background/80 backdrop-blur-lg border-b border-primary/30">
+        <div className="container mx-auto px-4 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-4">
+              <div className="text-3xl font-bold text-primary animate-glow">
+                <i className="fas fa-rocket mr-2"></i>
+                Proteus Nebula
+              </div>
+            </div>
+            
+            <div className="flex items-center space-x-4">
+              <div className="flex items-center space-x-3 bg-card/50 rounded-lg px-4 py-2 border border-primary/30">
+                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-primary to-accent overflow-hidden">
+                  <img 
+                    src={user?.profileImageUrl || "https://images.unsplash.com/photo-1614728263952-84ea256f9679?ixlib=rb-4.0.3&auto=format&fit=crop&w=64&h=64"} 
+                    alt="Profile" 
+                    className="w-full h-full object-cover"
+                  />
+                </div>
+                <div className="hidden md:block">
+                  <div className="text-sm font-semibold">{user?.username || user?.firstName || "Commander"}</div>
+                  <div className="text-xs text-muted-foreground">Level {user?.level || 1}</div>
+                </div>
+              </div>
+              
+              <div className="flex items-center space-x-2 bg-card/50 rounded-lg px-3 py-2 border border-accent/30">
+                <i className="fas fa-coins text-accent"></i>
+                <span className="font-semibold text-accent">{user?.credits || 0}</span>
+              </div>
+
+              <Button variant="outline" onClick={handleLogout}>
+                <i className="fas fa-sign-out-alt mr-2"></i>
+                Logout
+              </Button>
+            </div>
+          </div>
+        </div>
+      </nav>
+
+      {/* Main Dashboard */}
+      <main className="relative z-10 container mx-auto px-4 py-8">
+        {/* Hero Section */}
         <div className="text-center mb-12">
-          <h1 className="text-5xl md:text-7xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-mystic-gold to-amber mb-6 animate-glow">
-            Welcome Back, Commander
+          <h1 className="text-5xl md:text-7xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-primary to-accent mb-6 animate-glow">
+            Welcome, Commander
           </h1>
-          <p className="text-xl text-star-silver mb-8">
-            Ready to expand your galactic empire? Choose your next mission.
+          <p className="text-xl text-muted-foreground mb-8 max-w-2xl mx-auto">
+            Your fleet awaits your orders. Choose your path to galactic domination.
           </p>
         </div>
 
-        {/* Quick Actions */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
-          <Card className="bg-gradient-to-br from-red-900/30 to-red-800/30 border border-red-500/30 hover:border-red-400 transition-all duration-300 cursor-pointer group">
-            <CardContent className="p-6 text-center">
-              <div className="w-16 h-16 bg-gradient-to-r from-red-500 to-red-600 rounded-full flex items-center justify-center mx-auto mb-4 group-hover:animate-pulse">
-                <Sword className="h-8 w-8 text-white" />
-              </div>
-              <h3 className="text-xl font-bold text-red-200 mb-2">Quick Battle</h3>
-              <p className="text-red-300/70 mb-4">Jump into combat against AI opponents</p>
+        {/* Game Modes */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 mb-12">
+          <Card className="bg-card/50 backdrop-blur-sm border-primary/30 hover:border-primary transition-all duration-300 transform hover:scale-105 cursor-pointer group">
+            <CardHeader>
+              <CardTitle className="flex items-center space-x-2 text-primary">
+                <div className="w-12 h-12 bg-gradient-to-r from-red-500 to-red-600 rounded-full flex items-center justify-center group-hover:animate-pulse">
+                  <i className="fas fa-robot text-white text-xl"></i>
+                </div>
+                <span>Quick Battle</span>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-muted-foreground mb-4">
+                Test your skills against AI opponents of varying difficulty
+              </p>
               <div className="space-y-2">
                 <Button 
-                  onClick={() => createAiGameMutation.mutate("Easy")}
-                  disabled={createAiGameMutation.isPending}
-                  className="w-full bg-green-600 hover:bg-green-700 text-white"
-                  size="sm"
+                  onClick={() => handleStartGame("easy")} 
+                  className="w-full"
+                  variant="outline"
+                  disabled={createGameMutation.isPending}
                 >
-                  Easy
+                  <Badge className="bg-green-600 mr-2">Easy</Badge>
+                  Start Easy Battle
                 </Button>
                 <Button 
-                  onClick={() => createAiGameMutation.mutate("Medium")}
-                  disabled={createAiGameMutation.isPending}
-                  className="w-full bg-yellow-600 hover:bg-yellow-700 text-white"
-                  size="sm"
+                  onClick={() => handleStartGame("medium")} 
+                  className="w-full"
+                  variant="outline"
+                  disabled={createGameMutation.isPending}
                 >
-                  Medium
+                  <Badge className="bg-yellow-600 mr-2">Medium</Badge>
+                  Start Medium Battle
                 </Button>
                 <Button 
-                  onClick={() => createAiGameMutation.mutate("Hard")}
-                  disabled={createAiGameMutation.isPending}
-                  className="w-full bg-red-600 hover:bg-red-700 text-white"
-                  size="sm"
+                  onClick={() => handleStartGame("hard")} 
+                  className="w-full"
+                  variant="outline"
+                  disabled={createGameMutation.isPending}
                 >
-                  Hard
+                  <Badge className="bg-red-600 mr-2">Hard</Badge>
+                  Start Hard Battle
                 </Button>
               </div>
             </CardContent>
           </Card>
 
-          <Card className="bg-gradient-to-br from-cosmic-blue/30 to-midnight/30 border border-mystic-gold/30 hover:border-mystic-gold transition-all duration-300 cursor-pointer group">
-            <CardContent className="p-6 text-center">
-              <div className="w-16 h-16 bg-gradient-to-r from-mystic-gold to-amber rounded-full flex items-center justify-center mx-auto mb-4 group-hover:animate-pulse">
-                <Users className="h-8 w-8 text-space-black" />
-              </div>
-              <h3 className="text-xl font-bold text-mystic-gold mb-2">Multiplayer</h3>
-              <p className="text-star-silver/70 mb-4">Challenge other commanders</p>
-              <Button className="w-full bg-mystic-gold hover:bg-amber text-space-black font-semibold">
-                Find Match
-              </Button>
-            </CardContent>
-          </Card>
-
-          <Card className="bg-gradient-to-br from-purple-900/30 to-purple-800/30 border border-purple-500/30 hover:border-purple-400 transition-all duration-300 cursor-pointer group">
-            <CardContent className="p-6 text-center">
-              <div className="w-16 h-16 bg-gradient-to-r from-purple-500 to-purple-600 rounded-full flex items-center justify-center mx-auto mb-4 group-hover:animate-pulse">
-                <Gift className="h-8 w-8 text-white" />
-              </div>
-              <h3 className="text-xl font-bold text-purple-200 mb-2">Booster Packs</h3>
-              <p className="text-purple-300/70 mb-4">
-                Available: {boosterPacks?.filter((pack: any) => !pack.isOpened).length || 0}
-              </p>
-              <Link href="/collection">
-                <Button className="w-full bg-purple-600 hover:bg-purple-700 text-white">
-                  Open Packs
-                </Button>
-              </Link>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Stats Overview */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-6 mb-12">
-          <Card className="bg-cosmic-blue/50 border-mystic-gold/30">
-            <CardContent className="p-6 text-center">
-              <div className="text-3xl font-bold text-mystic-gold">{user.wins || 0}</div>
-              <div className="text-star-silver/70">Total Wins</div>
-            </CardContent>
-          </Card>
-          
-          <Card className="bg-cosmic-blue/50 border-mystic-gold/30">
-            <CardContent className="p-6 text-center">
-              <div className="text-3xl font-bold text-mystic-gold">
-                {user.wins && user.losses ? Math.round((user.wins / (user.wins + user.losses)) * 100) : 0}%
-              </div>
-              <div className="text-star-silver/70">Win Rate</div>
-            </CardContent>
-          </Card>
-          
-          <Card className="bg-cosmic-blue/50 border-mystic-gold/30">
-            <CardContent className="p-6 text-center">
-              <div className="text-3xl font-bold text-mystic-gold">{user.level || 1}</div>
-              <div className="text-star-silver/70">Level</div>
-            </CardContent>
-          </Card>
-          
-          <Card className="bg-cosmic-blue/50 border-mystic-gold/30">
-            <CardContent className="p-6 text-center">
-              <div className="text-3xl font-bold text-mystic-gold">{user.experience || 0}</div>
-              <div className="text-star-silver/70">Experience</div>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Quick Links */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <Card className="bg-gradient-to-br from-cosmic-blue/40 to-midnight/40 border border-mystic-gold/30 hover:border-mystic-gold transition-all duration-300">
+          <Card className="bg-card/50 backdrop-blur-sm border-primary/30 hover:border-primary transition-all duration-300 transform hover:scale-105">
             <CardHeader>
-              <CardTitle className="flex items-center text-mystic-gold">
-                <Layers className="mr-2 h-5 w-5" />
-                Deck Management
+              <CardTitle className="flex items-center space-x-2 text-primary">
+                <div className="w-12 h-12 bg-gradient-to-r from-primary to-accent rounded-full flex items-center justify-center">
+                  <i className="fas fa-layer-group text-primary-foreground text-xl"></i>
+                </div>
+                <span>Collection</span>
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <p className="text-star-silver/70 mb-4">
-                Build and customize your fleet. Active decks: {userDecks?.filter((deck: any) => deck.isActive).length || 0}
+              <p className="text-muted-foreground mb-4">
+                Manage your cards and build powerful decks
               </p>
-              <Link href="/deck-builder">
-                <Button className="w-full bg-cosmic-blue hover:bg-cosmic-blue/80 text-mystic-gold border border-mystic-gold/30">
-                  <Layers className="mr-2 h-4 w-4" />
-                  Deck Builder
-                </Button>
-              </Link>
+              <div className="space-y-2">
+                <div className="text-center">
+                  <div className="text-2xl font-bold text-primary">{collection?.length || 0}</div>
+                  <div className="text-sm text-muted-foreground">Cards Collected</div>
+                </div>
+                <DeckBuilder />
+              </div>
             </CardContent>
           </Card>
 
-          <Card className="bg-gradient-to-br from-cosmic-blue/40 to-midnight/40 border border-mystic-gold/30 hover:border-mystic-gold transition-all duration-300">
+          <Card className="bg-card/50 backdrop-blur-sm border-primary/30 hover:border-primary transition-all duration-300 transform hover:scale-105">
             <CardHeader>
-              <CardTitle className="flex items-center text-mystic-gold">
-                <Trophy className="mr-2 h-5 w-5" />
-                Rankings & Records
+              <CardTitle className="flex items-center space-x-2 text-primary">
+                <div className="w-12 h-12 bg-gradient-to-r from-purple-500 to-purple-600 rounded-full flex items-center justify-center">
+                  <i className="fas fa-gift text-white text-xl"></i>
+                </div>
+                <span>Booster Packs</span>
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <p className="text-star-silver/70 mb-4">
-                Current Rank: {user.currentRank || "Cadet"}
+              <p className="text-muted-foreground mb-4">
+                Open packs to discover new cards and expand your collection
               </p>
-              <Button className="w-full bg-cosmic-blue hover:bg-cosmic-blue/80 text-mystic-gold border border-mystic-gold/30">
-                <Trophy className="mr-2 h-4 w-4" />
-                View Leaderboard
-              </Button>
+              <div className="space-y-2">
+                <div className="text-center">
+                  <div className="text-2xl font-bold text-primary">{boosterPacks?.reduce((sum, pack) => sum + pack.quantity, 0) || 0}</div>
+                  <div className="text-sm text-muted-foreground">Packs Available</div>
+                </div>
+                <BoosterPack />
+              </div>
             </CardContent>
           </Card>
         </div>
 
-        {/* Development Tools */}
-        <div className="mt-12 text-center">
-          <Card className="bg-cosmic-blue/30 border-amber/30 inline-block">
-            <CardContent className="p-4">
-              <p className="text-amber/70 mb-2">Development Mode</p>
-              <Button 
-                onClick={() => initDataMutation.mutate()}
-                disabled={initDataMutation.isPending}
-                variant="outline"
-                className="border-amber text-amber hover:bg-amber hover:text-space-black"
-              >
-                {initDataMutation.isPending ? "Initializing..." : "Initialize Game Data"}
-              </Button>
-            </CardContent>
-          </Card>
-        </div>
+        {/* Player Stats */}
+        <Card className="bg-gradient-to-r from-card/50 to-card/30 backdrop-blur-sm border-primary/30 mb-8">
+          <CardHeader>
+            <CardTitle className="text-center text-primary text-2xl">
+              <i className="fas fa-chart-line mr-2"></i>
+              Commander Statistics
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-6 text-center">
+              <div>
+                <div className="text-3xl font-bold text-primary">{user?.wins || 0}</div>
+                <div className="text-muted-foreground">Victories</div>
+              </div>
+              <div>
+                <div className="text-3xl font-bold text-primary">
+                  {user?.wins && user?.losses ? Math.round((user.wins / (user.wins + user.losses)) * 100) : 0}%
+                </div>
+                <div className="text-muted-foreground">Win Rate</div>
+              </div>
+              <div>
+                <div className="text-3xl font-bold text-primary">{user?.level || 1}</div>
+                <div className="text-muted-foreground">Level</div>
+              </div>
+              <div>
+                <div className="text-3xl font-bold text-primary">{user?.experience || 0}</div>
+                <div className="text-muted-foreground">Experience</div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Recent Activity */}
+        <Card className="bg-card/50 backdrop-blur-sm border-primary/30">
+          <CardHeader>
+            <CardTitle className="text-primary">
+              <i className="fas fa-history mr-2"></i>
+              Fleet Status
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              <div className="flex justify-between items-center p-3 bg-background/30 rounded-lg">
+                <span className="text-muted-foreground">Active Decks</span>
+                <span className="text-primary font-semibold">{decks?.filter(deck => deck.isActive).length || 0}</span>
+              </div>
+              <div className="flex justify-between items-center p-3 bg-background/30 rounded-lg">
+                <span className="text-muted-foreground">Total Decks</span>
+                <span className="text-primary font-semibold">{decks?.length || 0}</span>
+              </div>
+              <div className="flex justify-between items-center p-3 bg-background/30 rounded-lg">
+                <span className="text-muted-foreground">Booster Packs</span>
+                <span className="text-primary font-semibold">{boosterPacks?.reduce((sum, pack) => sum + pack.quantity, 0) || 0}</span>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
       </main>
     </div>
   );

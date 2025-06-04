@@ -1,4 +1,4 @@
-import cardsSpecifics from './CardsSpecifics';
+import { cardsSpecifics } from './CardsSpecifics';
 
 export const Phases = {
   COMMAND: "Command Phase",
@@ -7,7 +7,7 @@ export const Phases = {
   END_TURN: "End Turn",
 };
 
-class GameMechanics {
+export class GameMechanics {
   private currentPhase: string;
   private isPlayerTurn: boolean;
 
@@ -57,6 +57,26 @@ class GameMechanics {
     } else {
       return zone === "player-unit-zone" || zone === "player-command-zone";
     }
+  }
+
+  isPlayersTurn() {
+    return this.isPlayerTurn;
+  }
+
+  calculateDamage(attacker: any, defender: any) {
+    // Basic damage calculation
+    const damage = Math.max(0, attacker.attack - defender.defense);
+    return damage;
+  }
+
+  checkWinCondition(playerHealth: number, opponentHealth: number) {
+    if (playerHealth <= 0) {
+      return { gameEnded: true, winner: 'opponent' };
+    }
+    if (opponentHealth <= 0) {
+      return { gameEnded: true, winner: 'player' };
+    }
+    return { gameEnded: false, winner: null };
   }
 }
 

@@ -1,322 +1,383 @@
 import { useState, useEffect } from "react";
+import { useLocation } from "wouter";
+import { useMutation } from "@tanstack/react-query";
+import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { useToast } from "@/hooks/use-toast";
-import CardComponent from "./CardComponent";
-import GameZone from "./GameZone";
-import type { Game } from "@/types/game";
+import { Badge } from "@/components/ui/badge";
+import CardComponent from "@/components/CardComponent";
+import StarBackground from "@/components/StarBackground";
+import { GameLogic, Phase } from "@/lib/gameLogic";
+import { useWebSocket } from "@/lib/websocket";
+import { isUnauthorizedError } from "@/lib/authUtils";
 
 interface GameInterfaceProps {
-  game: Game;
-  onGameAction: (action: any) => void;
-  lastMessage: any;
+  game: any;
 }
 
-export default function GameInterface({ game, onGameAction, lastMessage }: GameInterfaceProps) {
+export default function GameInterface({ game }: GameInterfaceProps) {
+  const [, setLocation] = useLocation();
   const { toast } = useToast();
+  const [gameState, setGameState] = useState(game.gameState || {
+    phase: Phase.COMMAND,
+    turn: 1,
+    player1Health: 100,
+    player2Health: 100,
+    player1CommandPoints: 0,
+    player2CommandPoints: 0,
+    player1Hand: [],
+    player2Hand: [],
+    player1Units: [],
+    player2Units: [],
+    player1Commands: [],
+    player2Commands: []
+  });
   const [selectedCard, setSelectedCard] = useState<any>(null);
-  const [gameState, setGameState] = useState(game.gameState || {});
-  const [currentPhase, setCurrentPhase] = useState(game.currentPhase || "Command");
+  const [gameLogic] = useState(new GameLogic());
 
-  // Handle incoming WebSocket messages
-  useEffect(() => {
-    if (lastMessage) {
-      switch (lastMessage.type) {
-        case 'game-update':
-          setGameState(lastMessage.gameState);
-          break;
-        case 'chat-message':
-          toast({
-            title: `${lastMessage.sender}:`,
-            description: lastMessage.message,
-          });
-          break;
-      }
+  // WebSocket connection for real-time updates
+  const { sendMessage } = useWebSocket(game.id, (message) => {
+    if (message.type === 'game_update') {
+      setGameState(message.game.gameState);
+    } else if (message.type === 'game_action') {
+      // Handle opponent actions
+      handleOpponentAction(message.action);
     }
-  }, [lastMessage, toast]);
+  });
+
+  const updateGameMutation = useMutation({
+    mutationFn: async (updates: any) => {
+      const response = await apiRequest("PUT", `/api/games/${game.id}`, updates);
+      return response.json();
+    },
+    onSuccess: (updatedGame) => {
+      setGameState(updatedGame.gameState);
+      queryClient.invalidateQueries({ queryKey: ["/api/games", game.id] });
+    },
+    onError: (error) => {
+      if (isUnauthorizedError(error)) {
+        toast({
+          title: "Unauthorized",
+          description: "You are logged out. Logging in again...",
+          variant: "destructive",
+        });
+        setTimeout(() => {
+          window.location.href = "/api/login";
+        }, 500);
+        return;
+      }
+      toast({
+        title: "Error",
+        description: "Failed to update game",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleOpponentAction = (action: any) => {
+    // Handle AI or opponent player actions
+    console.log("Opponent action:", action);
+  };
+
+  const handleCardClick = (card: any) => {
+    if (selectedCard === card) {
+      setSelectedCard(null);
+    } else {
+      setSelectedCard(card);
+    }
+  };
 
   const handleEndPhase = () => {
-    const phases = ["Command", "Deployment", "Battle", "End"];
-    const currentIndex = phases.indexOf(currentPhase);
-    const nextPhase = phases[(currentIndex + 1) % phases.length];
-    
-    setCurrentPhase(nextPhase);
-    
-    onGameAction({
-      type: 'end-phase',
-      newPhase: nextPhase,
-      gameId: game.id,
-    });
+    const newPhase = gameLogic.getNextPhase(gameState.phase);
+    const newGameState = {
+      ...gameState,
+      phase: newPhase,
+      turn: newPhase === Phase.COMMAND ? gameState.turn + 1 : gameState.turn
+    };
 
-    toast({
-      title: "Phase Ended",
-      description: `Moving to ${nextPhase} Phase`,
+    setGameState(newGameState);
+    updateGameMutation.mutate({ gameState: newGameState, currentPhase: newPhase });
+    
+    // Notify other players
+    sendMessage({
+      type: 'game_action',
+      action: { type: 'phase_ended', newPhase, gameState: newGameState }
     });
   };
 
-  const handleCardPlay = (card: any, zone: string) => {
-    if (!selectedCard) {
-      toast({
-        title: "No Card Selected",
-        description: "Please select a card first",
-        variant: "destructive",
-      });
-      return;
+  const handleDeployCard = (zone: string) => {
+    if (!selectedCard) return;
+
+    const newGameState = { ...gameState };
+    
+    if (zone === "player-unit-zone") {
+      newGameState.player1Units = [...newGameState.player1Units, selectedCard];
+      newGameState.player1Hand = newGameState.player1Hand.filter((card: any) => card !== selectedCard);
+    } else if (zone === "player-command-zone") {
+      newGameState.player1Commands = [...newGameState.player1Commands, selectedCard];
+      newGameState.player1Hand = newGameState.player1Hand.filter((card: any) => card !== selectedCard);
+      newGameState.player1CommandPoints += gameLogic.getCommandPoints(selectedCard);
     }
 
-    onGameAction({
-      type: 'play-card',
-      card: selectedCard,
-      zone,
-      gameId: game.id,
-    });
-
+    setGameState(newGameState);
     setSelectedCard(null);
+    updateGameMutation.mutate({ gameState: newGameState });
     
-    toast({
-      title: "Card Played",
-      description: `${selectedCard.name} deployed to ${zone}`,
+    // Notify other players
+    sendMessage({
+      type: 'game_action',
+      action: { type: 'card_deployed', card: selectedCard, zone, gameState: newGameState }
     });
   };
 
-  const handleDrawCard = () => {
-    if (currentPhase !== "Command") {
-      toast({
-        title: "Invalid Action",
-        description: "You can only draw cards in the Command Phase",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    onGameAction({
-      type: 'draw-card',
-      gameId: game.id,
-    });
-
-    toast({
-      title: "Card Drawn",
-      description: "You drew a card from your deck",
-    });
+  const handleExitGame = () => {
+    setLocation("/");
   };
-
-  // Mock data for demonstration - in real app this would come from game state
-  const playerHand = [
-    { id: 1, name: "Star Destroyer", type: "Unit", cost: 8, attack: 6, defense: 8 },
-    { id: 2, name: "Fighter Squadron", type: "Unit", cost: 3, attack: 4, defense: 2 },
-    { id: 3, name: "Command Center", type: "Shipyard", cost: 4, attack: 0, defense: 6 },
-    { id: 4, name: "Plasma Cannon", type: "Command", cost: 2, attack: 4, defense: 0 },
-    { id: 5, name: "Shield Generator", type: "Command", cost: 1, attack: 0, defense: 0 },
-  ];
-
-  const playerUnits = [
-    { id: 6, name: "Cruiser", type: "Unit", cost: 5, attack: 4, defense: 5 },
-  ];
-
-  const playerCommands = [
-    { id: 7, name: "Star Forge", type: "Shipyard", cost: 6, attack: 0, defense: 8 },
-  ];
-
-  const opponentUnits = [
-    { id: 8, name: "Alien Destroyer", type: "Unit", cost: 7, attack: 5, defense: 6 },
-    { id: 9, name: "Fighter Wing", type: "Unit", cost: 4, attack: 3, defense: 3 },
-  ];
 
   return (
-    <div className="h-screen flex flex-col bg-black text-white">
-      {/* Game Controls */}
-      <div className="bg-gray-900/90 backdrop-blur-sm border-b border-yellow-500/30 p-4">
-        <div className="flex items-center justify-between max-w-7xl mx-auto">
-          <div className="flex items-center space-x-6">
-            <div className="bg-gray-800 rounded-lg px-4 py-2 border border-yellow-500/50">
-              <div className="text-center">
-                <div className="text-xs text-gray-300">Current Phase</div>
-                <div className="font-bold text-yellow-400">{currentPhase}</div>
+    <div className="min-h-screen bg-background relative overflow-hidden">
+      <StarBackground />
+      
+      {/* Game Header */}
+      <header className="relative z-50 bg-gradient-to-r from-background/90 via-card/90 to-background/90 backdrop-blur-lg border-b border-primary/30 p-4">
+        <div className="container mx-auto">
+          <div className="flex justify-between items-center">
+            <div className="flex items-center space-x-6">
+              <Button 
+                variant="outline" 
+                onClick={handleExitGame}
+                className="hover:bg-destructive hover:text-destructive-foreground"
+              >
+                <i className="fas fa-arrow-left mr-2"></i>
+                Exit Game
+              </Button>
+              <div className="flex items-center space-x-4">
+                <Badge variant="secondary" className="bg-card/50 text-primary border-primary/30">
+                  {gameState.phase}
+                </Badge>
+                <Badge variant="outline" className="border-primary/30">
+                  Turn: {gameState.turn}
+                </Badge>
               </div>
             </div>
             
-            <div className="bg-gray-800 rounded-lg px-4 py-2 border border-yellow-500/50">
-              <div className="text-center">
-                <div className="text-xs text-gray-300">Command Points</div>
-                <div className="font-bold text-yellow-400">5</div>
+            <div className="flex items-center space-x-4">
+              <Badge className="bg-primary text-primary-foreground">
+                <i className="fas fa-star mr-1"></i>
+                Command Points: {gameState.player1CommandPoints}
+              </Badge>
+              <Button 
+                onClick={handleEndPhase}
+                className="bg-primary hover:bg-accent animate-pulse-gold"
+                disabled={updateGameMutation.isPending}
+              >
+                <i className="fas fa-forward mr-2"></i>
+                End Phase
+              </Button>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      {/* Game Board */}
+      <main className="relative z-10 container mx-auto p-4 space-y-6">
+        
+        {/* Opponent Area */}
+        <div className="space-y-4">
+          {/* Opponent Info */}
+          <div className="flex items-center justify-between bg-gradient-to-r from-destructive/20 to-destructive/10 rounded-lg p-4 border border-destructive/30">
+            <div className="flex items-center space-x-4">
+              <div className="w-12 h-12 rounded-full bg-gradient-to-br from-destructive to-red-700 overflow-hidden border-2 border-destructive">
+                <div className="w-full h-full bg-destructive/20 flex items-center justify-center">
+                  <i className="fas fa-robot text-white"></i>
+                </div>
+              </div>
+              <div>
+                <div className="font-semibold text-destructive">
+                  {game.isAI ? `AI Commander (${game.aiDifficulty})` : "Opponent"}
+                </div>
+                <div className="text-sm text-muted-foreground">Enemy Fleet</div>
               </div>
             </div>
-
-            <div className="bg-gray-800 rounded-lg px-4 py-2 border border-yellow-500/50">
+            <div className="flex items-center space-x-6">
               <div className="text-center">
-                <div className="text-xs text-gray-300">Turn</div>
-                <div className="font-bold text-yellow-400">{game.currentTurn || 1}</div>
+                <div className="text-xs text-muted-foreground">Health</div>
+                <div className="font-bold text-destructive">{gameState.player2Health}/100</div>
+              </div>
+              <div className="text-center">
+                <div className="text-xs text-muted-foreground">Cards</div>
+                <div className="font-bold text-destructive">{gameState.player2Hand?.length || 0}</div>
               </div>
             </div>
           </div>
           
-          <div className="flex items-center space-x-4">
-            <Button
-              onClick={handleEndPhase}
-              className="bg-gradient-to-r from-yellow-400 to-yellow-600 hover:from-yellow-500 hover:to-yellow-700 text-black font-semibold animate-pulse"
-            >
-              <i className="fas fa-forward mr-2"></i>
-              End Phase
-            </Button>
-            
-            <Button
-              variant="outline"
-              className="border-red-500 text-red-400 hover:bg-red-500/10"
-            >
-              <i className="fas fa-flag mr-2"></i>
-              Surrender
-            </Button>
+          {/* Opponent Hand (Hidden) */}
+          <div className="flex justify-center space-x-2">
+            {Array.from({ length: gameState.player2Hand?.length || 5 }).map((_, index) => (
+              <div key={index} className="w-16 h-24 bg-gradient-to-br from-card to-background rounded-lg border-2 border-primary/30 shadow-lg">
+                <div className="w-full h-full flex items-center justify-center">
+                  <i className="fas fa-question text-primary/50"></i>
+                </div>
+              </div>
+            ))}
           </div>
-        </div>
-      </div>
-
-      {/* Game Board */}
-      <div className="flex-1 overflow-hidden">
-        {/* Opponent Area */}
-        <div className="bg-red-900/20 border-b border-red-500/30 p-4">
-          <div className="max-w-7xl mx-auto">
-            {/* Opponent Info */}
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center space-x-4">
-                <div className="w-12 h-12 rounded-full bg-gradient-to-br from-red-500 to-red-700 flex items-center justify-center">
-                  <i className="fas fa-robot text-white"></i>
-                </div>
-                <div>
-                  <div className="font-semibold text-red-200">AI Commander</div>
-                  <div className="text-sm text-red-300/70">Hard Difficulty</div>
-                </div>
-              </div>
-              <div className="flex items-center space-x-6">
-                <div className="text-center">
-                  <div className="text-xs text-red-300/70">Health</div>
-                  <div className="font-bold text-red-200">85/100</div>
-                </div>
-                <div className="text-center">
-                  <div className="text-xs text-red-300/70">Cards</div>
-                  <div className="font-bold text-red-200">6</div>
-                </div>
-              </div>
-            </div>
-
-            {/* Opponent Hand (Hidden) */}
-            <div className="flex justify-center space-x-2 mb-4">
-              {Array.from({ length: 6 }).map((_, index) => (
-                <div
-                  key={index}
-                  className="w-16 h-24 bg-gradient-to-br from-red-800 to-red-900 rounded-lg border border-red-500/50 flex items-center justify-center"
-                >
-                  <i className="fas fa-question text-red-400"></i>
-                </div>
-              ))}
-            </div>
-
-            {/* Opponent Zones */}
-            <div className="grid grid-cols-2 gap-4">
-              <GameZone
-                title="Opponent Command Zone"
-                cards={[]}
-                className="bg-red-900/30 border-red-500/50"
-                onCardDrop={() => {}}
-                readOnly
-              />
-              <GameZone
-                title="Opponent Unit Zone"
-                cards={opponentUnits}
-                className="bg-red-900/30 border-red-500/50"
-                onCardDrop={() => {}}
-                readOnly
-              />
-            </div>
-          </div>
-        </div>
-
-        {/* Battle Zone */}
-        <div className="bg-gradient-to-r from-orange-900/20 to-red-900/20 border-y border-orange-500/30 p-4">
-          <div className="max-w-7xl mx-auto text-center">
-            <div className="text-orange-400 font-bold text-lg mb-2">
-              <i className="fas fa-crosshairs mr-2"></i>
-              Battle Zone
-            </div>
-            <div className="text-gray-300">Combat resolution area</div>
-          </div>
-        </div>
-
-        {/* Player Area */}
-        <div className="bg-blue-900/20 border-t border-blue-500/30 p-4 flex-1">
-          <div className="max-w-7xl mx-auto h-full flex flex-col">
-            {/* Player Zones */}
-            <div className="grid grid-cols-2 gap-4 mb-4 flex-1">
-              <GameZone
-                title="Your Command Zone"
-                cards={playerCommands}
-                className="bg-blue-900/30 border-blue-500/50"
-                onCardDrop={(card) => handleCardPlay(card, "command")}
-                selectedCard={selectedCard}
-              />
-              <GameZone
-                title="Your Unit Zone"
-                cards={playerUnits}
-                className="bg-blue-900/30 border-blue-500/50"
-                onCardDrop={(card) => handleCardPlay(card, "unit")}
-                selectedCard={selectedCard}
-              />
-            </div>
-
-            {/* Player Info */}
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center space-x-4">
-                <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center">
-                  <i className="fas fa-user text-white"></i>
-                </div>
-                <div>
-                  <div className="font-semibold text-blue-200">You</div>
-                  <div className="text-sm text-blue-300/70">Rank: Captain</div>
-                </div>
-              </div>
-              <div className="flex items-center space-x-6">
-                <div className="text-center">
-                  <div className="text-xs text-blue-300/70">Health</div>
-                  <div className="font-bold text-blue-200">100/100</div>
-                </div>
-                <div className="text-center">
-                  <div className="text-xs text-blue-300/70">Deck</div>
-                  <div className="font-bold text-blue-200">23</div>
-                </div>
-                <Button
-                  onClick={handleDrawCard}
-                  disabled={currentPhase !== "Command"}
-                  className="bg-blue-600 hover:bg-blue-700 text-white"
-                >
-                  <i className="fas fa-plus mr-2"></i>
-                  Draw Card
-                </Button>
-              </div>
-            </div>
-
-            {/* Player Hand */}
-            <Card className="bg-gray-900/50 border-yellow-500/30">
+          
+          {/* Opponent Zones */}
+          <div className="grid grid-cols-2 gap-4">
+            <Card className="bg-destructive/10 border-destructive/30 min-h-32">
               <CardContent className="p-4">
-                <div className="text-center mb-3 text-gray-300">Your Hand</div>
-                <div className="flex justify-center space-x-3 overflow-x-auto">
-                  {playerHand.map((card) => (
-                    <div
-                      key={card.id}
-                      onClick={() => setSelectedCard(card)}
-                      className={`cursor-pointer transition-all duration-200 hover:scale-110 hover:-translate-y-2 ${
-                        selectedCard?.id === card.id
-                          ? "scale-110 -translate-y-2 ring-2 ring-yellow-400"
-                          : ""
-                      }`}
-                    >
-                      <CardComponent card={card} compact />
-                    </div>
+                <div className="text-center text-destructive font-semibold mb-2">
+                  <i className="fas fa-chess-king mr-1"></i>
+                  Opponent Command
+                </div>
+                <div className="flex flex-wrap gap-2 justify-center">
+                  {gameState.player2Commands?.map((card: any, index: number) => (
+                    <CardComponent key={index} card={card} size="small" />
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+            
+            <Card className="bg-destructive/10 border-destructive/30 min-h-32">
+              <CardContent className="p-4">
+                <div className="text-center text-destructive font-semibold mb-2">
+                  <i className="fas fa-sword mr-1"></i>
+                  Opponent Units
+                </div>
+                <div className="flex flex-wrap gap-2 justify-center">
+                  {gameState.player2Units?.map((card: any, index: number) => (
+                    <CardComponent key={index} card={card} size="small" />
                   ))}
                 </div>
               </CardContent>
             </Card>
           </div>
         </div>
-      </div>
+
+        {/* Battle Zone */}
+        <div className="relative">
+          <div className="absolute inset-0 flex items-center">
+            <div className="w-full border-t border-primary/30"></div>
+          </div>
+          <div className="relative flex justify-center text-sm">
+            <span className="bg-background px-4 py-2 text-primary font-semibold rounded-full border border-primary/30">
+              <i className="fas fa-crossed-swords mr-2"></i>
+              BATTLE ZONE
+            </span>
+          </div>
+        </div>
+
+        {/* Player Zones */}
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <Card 
+              className="bg-primary/10 border-primary/50 min-h-32 cursor-pointer hover:border-primary transition-all duration-300"
+              onClick={() => handleDeployCard("player-command-zone")}
+            >
+              <CardContent className="p-4">
+                <div className="text-center text-primary font-semibold mb-2">
+                  <i className="fas fa-chess-king mr-1"></i>
+                  Your Command
+                </div>
+                <div className="flex flex-wrap gap-2 justify-center">
+                  {gameState.player1Commands?.map((card: any, index: number) => (
+                    <CardComponent 
+                      key={index} 
+                      card={card} 
+                      size="small"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleCardClick(card);
+                      }}
+                      selected={selectedCard === card}
+                    />
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+            
+            <Card 
+              className="bg-primary/10 border-primary/50 min-h-32 cursor-pointer hover:border-primary transition-all duration-300"
+              onClick={() => handleDeployCard("player-unit-zone")}
+            >
+              <CardContent className="p-4">
+                <div className="text-center text-primary font-semibold mb-2">
+                  <i className="fas fa-sword mr-1"></i>
+                  Your Units
+                </div>
+                <div className="flex flex-wrap gap-2 justify-center">
+                  {gameState.player1Units?.map((card: any, index: number) => (
+                    <CardComponent 
+                      key={index} 
+                      card={card} 
+                      size="small"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleCardClick(card);
+                      }}
+                      selected={selectedCard === card}
+                    />
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+          
+          {/* Player Info */}
+          <div className="flex items-center justify-between bg-gradient-to-r from-primary/20 to-primary/10 rounded-lg p-4 border border-primary/30">
+            <div className="flex items-center space-x-4">
+              <div className="w-12 h-12 rounded-full bg-gradient-to-br from-primary to-accent overflow-hidden border-2 border-primary">
+                <div className="w-full h-full bg-primary/20 flex items-center justify-center">
+                  <i className="fas fa-user text-primary-foreground"></i>
+                </div>
+              </div>
+              <div>
+                <div className="font-semibold text-primary">Commander</div>
+                <div className="text-sm text-muted-foreground">Your Fleet</div>
+              </div>
+            </div>
+            <div className="flex items-center space-x-6">
+              <div className="text-center">
+                <div className="text-xs text-muted-foreground">Health</div>
+                <div className="font-bold text-primary">{gameState.player1Health}/100</div>
+              </div>
+              <div className="text-center">
+                <div className="text-xs text-muted-foreground">Deck</div>
+                <div className="font-bold text-primary">23</div>
+              </div>
+            </div>
+          </div>
+          
+          {/* Player Hand */}
+          <Card className="bg-gradient-to-t from-card/50 to-transparent border-primary/20">
+            <CardContent className="p-4">
+              <div className="text-center mb-4">
+                <div className="text-sm text-muted-foreground">Your Hand</div>
+              </div>
+              
+              <div className="flex justify-center space-x-3 overflow-x-auto pb-2">
+                {gameState.player1Hand?.map((card: any, index: number) => (
+                  <CardComponent 
+                    key={index} 
+                    card={card}
+                    onClick={() => handleCardClick(card)}
+                    selected={selectedCard === card}
+                    className="flex-shrink-0"
+                  />
+                ))}
+              </div>
+              
+              <div className="flex justify-center mt-4 space-x-4">
+                <Button variant="outline" className="border-primary/30 hover:border-primary">
+                  <i className="fas fa-plus mr-2"></i>
+                  Draw Card
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </main>
     </div>
   );
 }

@@ -1,6 +1,6 @@
-import React, { Component } from 'react';
+import { Component } from 'react';
 
-interface Particle {
+class Particle {
   x: number;
   y: number;
   radius: number;
@@ -11,31 +11,16 @@ interface Particle {
   friction: number;
   decay: number;
   gravity: number;
-  
-  update(): void;
-  draw(ctx: CanvasRenderingContext2D): void;
-  randomBetween(min: number, max: number): number;
-}
+  explode: boolean;
 
-class ParticleImpl implements Particle {
-  x: number;
-  y: number;
-  radius: number;
-  direction: number;
-  velocity: number;
-  velX: number;
-  velY: number;
-  friction: number;
-  decay: number;
-  gravity: number;
-
-  constructor(options: Partial<Particle>) {
+  constructor(options: any) {
     const defaults = {
       x: 0,
       y: 0,
       radius: 10,
       direction: 0,
       velocity: 0,
+      explode: false
     };
 
     Object.assign(this, defaults, options);
@@ -58,7 +43,7 @@ class ParticleImpl implements Particle {
 
   draw(ctx: CanvasRenderingContext2D) {
     ctx.beginPath();
-    ctx.fillStyle = 'rgba(255, 215, 0, 1)';
+    ctx.fillStyle = 'rgba(255, 215, 0, 1)'; // Gold color
     ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
     ctx.fill();
   }
@@ -68,24 +53,37 @@ class ParticleImpl implements Particle {
   }
 }
 
-interface BoosterAnimationProps {
-  visible: boolean;
+interface ParticleCanvasProps {
+  visible?: boolean;
+  onAnimationComplete?: () => void;
 }
 
-interface BoosterAnimationState {}
+interface ParticleCanvasState {
+  particles: Particle[];
+}
 
-class BoosterAnimation extends Component<BoosterAnimationProps, BoosterAnimationState> {
-  private canvasRef = React.createRef<HTMLCanvasElement>();
-  private particles: ParticleImpl[] = [];
-  private rafId: number | null = null;
+class ParticleCanvas extends Component<ParticleCanvasProps, ParticleCanvasState> {
+  private canvasRef: React.RefObject<HTMLCanvasElement>;
   private canvas: HTMLCanvasElement | null = null;
   private ctx: CanvasRenderingContext2D | null = null;
+  private rafId: number | null = null;
+  private frame = 0;
+
+  constructor(props: ParticleCanvasProps) {
+    super(props);
+    this.canvasRef = React.createRef();
+    this.state = {
+      particles: []
+    };
+  }
 
   componentDidMount() {
-    if (this.canvasRef.current) {
-      this.canvas = this.canvasRef.current;
+    this.canvas = this.canvasRef.current;
+    if (this.canvas) {
       this.ctx = this.canvas.getContext('2d');
       this.setStage();
+      this.createRandomParticles();
+      this.loop();
       window.addEventListener('resize', this.setStage);
     }
   }
@@ -117,39 +115,57 @@ class BoosterAnimation extends Component<BoosterAnimationProps, BoosterAnimation
     ctx.globalCompositeOperation = 'lighter';
   }
 
+  createRandomParticles = () => {
+    if (!this.canvas) return;
+    
+    const margin = 100;
+    const canvasWidth = this.canvas.width;
+    const canvasHeight = this.canvas.height;
+    const x = this.randomBetween(margin, canvasWidth - margin);
+    const y = this.randomBetween(margin, canvasHeight - margin);
+    this.createParticles(x, y);
+  }
+
   createParticles = (x: number, y: number) => {
     let numParticles = 50;
+    const newParticles: Particle[] = [];
+    
     while (numParticles--) {
       const direction = Math.random() * Math.PI * 2;
       const velocity = this.randomBetween(10, 20);
       const radius = 10 + (Math.random() * 20);
-      const particle = new ParticleImpl({
+      const explode = true;
+      const particle = new Particle({
         x,
         y,
         direction,
         velocity,
         radius,
+        explode
       });
-      this.particles.push(particle);
+      newParticles.push(particle);
     }
+    
+    this.setState({ particles: newParticles });
   }
 
   loop = () => {
-    if (!this.ctx) return;
-    
     this.clear();
-    this.particles.forEach((particle, index) => {
+    const { particles } = this.state;
+    const activeParticles = particles.filter(particle => {
       particle.update();
-      particle.draw(this.ctx!);
-      
-      // Remove particles that are too small
-      if (particle.radius < 0.5) {
-        this.particles.splice(index, 1);
+      if (this.ctx) {
+        particle.draw(this.ctx);
       }
+      return particle.radius > 0.5;
     });
-    
-    if (this.particles.length > 0) {
+
+    this.setState({ particles: activeParticles });
+
+    if (activeParticles.length > 0) {
       this.rafId = requestAnimationFrame(this.loop);
+    } else if (this.props.onAnimationComplete) {
+      this.props.onAnimationComplete();
     }
   }
 
@@ -161,7 +177,7 @@ class BoosterAnimation extends Component<BoosterAnimationProps, BoosterAnimation
     }
   }
 
-  boom = (e: React.MouseEvent) => {
+  boom = (e: React.MouseEvent<HTMLCanvasElement>) => {
     this.createParticles(e.clientX, e.clientY);
   }
 
@@ -181,7 +197,7 @@ class BoosterAnimation extends Component<BoosterAnimationProps, BoosterAnimation
           top: 0,
           left: 0,
           pointerEvents: 'none',
-          zIndex: 1000
+          zIndex: 9999
         }}
         onMouseDown={this.boom}
       />
@@ -189,4 +205,4 @@ class BoosterAnimation extends Component<BoosterAnimationProps, BoosterAnimation
   }
 }
 
-export default BoosterAnimation;
+export default ParticleCanvas;
