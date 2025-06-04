@@ -8,7 +8,7 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { isUnauthorizedError } from "@/lib/authUtils";
 import StarBackground from "@/components/StarBackground";
-import BoosterPackModal from "@/components/BoosterPackModal";
+import BoosterPackModal from "@/components/game/BoosterPackModal";
 
 interface UserStats {
   totalWins: number;
