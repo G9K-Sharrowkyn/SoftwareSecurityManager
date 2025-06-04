@@ -1,94 +1,90 @@
-import { Link, useLocation } from "wouter";
-import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/useAuth";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { useLocation } from "wouter";
+import { Rocket, User, Coins, Home, Layers, Trophy, Settings } from "lucide-react";
 
 export default function Navigation() {
   const { user } = useAuth();
-  const [location] = useLocation();
+  const [location, setLocation] = useLocation();
 
   const handleLogout = () => {
     window.location.href = "/api/logout";
   };
 
   const navItems = [
-    { href: "/", label: "Dashboard", icon: "fas fa-home" },
-    { href: "/collection", label: "Collection", icon: "fas fa-layer-group" },
-    { href: "/deck-builder", label: "Deck Builder", icon: "fas fa-hammer" },
+    { path: "/", label: "Home", icon: Home },
+    { path: "/collection", label: "Collection", icon: Layers },
+    { path: "/deck-builder", label: "Deck Builder", icon: Settings },
   ];
 
   return (
-    <nav className="fixed top-0 left-0 right-0 z-50 bg-cosmic-800/90 backdrop-blur-md border-b border-cosmic-600">
-      <div className="container mx-auto px-4">
-        <div className="flex justify-between items-center h-16">
+    <nav className="bg-black/20 backdrop-blur-sm border-b border-primary/30 sticky top-0 z-50">
+      <div className="container mx-auto px-4 py-4">
+        <div className="flex items-center justify-between">
           {/* Logo */}
-          <Link href="/">
-            <div className="flex items-center space-x-2 cursor-pointer">
-              <i className="fas fa-rocket text-cosmic-gold text-2xl"></i>
-              <span className="text-xl font-bold text-cosmic-gold">Proteus Nebula</span>
-            </div>
-          </Link>
+          <div className="flex items-center space-x-3">
+            <Rocket className="h-8 w-8 text-primary" />
+            <h1 className="text-2xl font-bold text-primary text-glow">Proteus Nebula</h1>
+          </div>
 
           {/* Navigation Links */}
           <div className="hidden md:flex items-center space-x-6">
             {navItems.map((item) => (
-              <Link key={item.href} href={item.href}>
-                <button 
-                  className={`flex items-center space-x-2 px-3 py-2 rounded transition-colors ${
-                    location === item.href 
-                      ? "text-cosmic-gold bg-cosmic-gold/10" 
-                      : "text-cosmic-silver hover:text-cosmic-gold"
-                  }`}
-                >
-                  <i className={item.icon}></i>
-                  <span>{item.label}</span>
-                </button>
-              </Link>
+              <Button
+                key={item.path}
+                variant={location === item.path ? "default" : "ghost"}
+                onClick={() => setLocation(item.path)}
+                className="flex items-center space-x-2"
+              >
+                <item.icon className="h-4 w-4" />
+                <span>{item.label}</span>
+              </Button>
             ))}
           </div>
 
           {/* User Info */}
           <div className="flex items-center space-x-4">
-            {/* Currency */}
-            <div className="flex items-center space-x-2 bg-cosmic-blue/50 rounded-lg px-3 py-2 border border-cosmic-gold/30">
-              <i className="fas fa-coins text-cosmic-gold"></i>
-              <span className="font-semibold text-cosmic-gold">{user?.currency || 0}</span>
+            {/* Credits */}
+            <div className="flex items-center space-x-2 bg-primary/20 rounded-lg px-3 py-2 border border-primary/30">
+              <Coins className="h-4 w-4 text-primary" />
+              <span className="font-semibold text-primary">{user?.credits || 0}</span>
             </div>
 
             {/* User Profile */}
-            <div className="flex items-center space-x-3 bg-cosmic-blue/50 rounded-lg px-4 py-2 border border-cosmic-gold/30">
-              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-cosmic-gold to-amber-500 overflow-hidden">
-                {user?.profileImageUrl ? (
-                  <img 
-                    src={user.profileImageUrl} 
-                    alt="Profile" 
-                    className="w-full h-full object-cover"
-                  />
-                ) : (
-                  <div className="w-full h-full bg-cosmic-gold/20 flex items-center justify-center">
-                    <i className="fas fa-user text-cosmic-gold text-sm"></i>
-                  </div>
-                )}
+            <div className="flex items-center space-x-3 bg-card/50 rounded-lg px-4 py-2 border border-primary/30">
+              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-primary to-accent flex items-center justify-center">
+                <User className="h-4 w-4 text-primary-foreground" />
               </div>
               <div className="hidden md:block">
-                <div className="text-sm font-semibold text-cosmic-silver">
-                  {user?.firstName || "Commander"}
+                <div className="text-sm font-semibold">
+                  {user?.firstName || `Commander ${user?.id?.slice(-4)}`}
                 </div>
-                <div className="text-xs text-cosmic-silver/70">
+                <div className="text-xs text-muted-foreground">
                   Level {user?.level || 1}
                 </div>
               </div>
             </div>
 
-            {/* Logout Button */}
-            <Button
-              onClick={handleLogout}
-              variant="outline"
-              className="border-cosmic-600 text-cosmic-silver hover:bg-cosmic-600"
-            >
-              <i className="fas fa-sign-out-alt mr-2"></i>
-              <span className="hidden md:inline">Logout</span>
+            {/* Logout */}
+            <Button variant="outline" onClick={handleLogout}>
+              Logout
             </Button>
           </div>
+        </div>
+
+        {/* Mobile Navigation */}
+        <div className="md:hidden mt-4 flex justify-center space-x-4">
+          {navItems.map((item) => (
+            <Button
+              key={item.path}
+              variant={location === item.path ? "default" : "ghost"}
+              size="sm"
+              onClick={() => setLocation(item.path)}
+            >
+              <item.icon className="h-4 w-4" />
+            </Button>
+          ))}
         </div>
       </div>
     </nav>

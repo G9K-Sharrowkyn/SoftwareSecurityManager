@@ -3,16 +3,10 @@ import { createServer, type Server } from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import { storage } from "./storage";
 import { setupAuth, isAuthenticated } from "./replitAuth";
-import { insertCardSchema, insertDeckSchema, insertGameSchema } from "@shared/schema";
+import { gameEngine } from "./gameEngine";
+import { aiEngine } from "./aiEngine";
 import { z } from "zod";
-
-interface GameConnection {
-  socket: WebSocket;
-  userId: string;
-  gameId?: string;
-}
-
-const gameConnections = new Map<string, GameConnection>();
+import { insertDeckSchema, insertGameSchema, insertBoosterPackSchema } from "@shared/schema";
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Auth middleware
@@ -30,10 +24,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // User profile routes
+  app.get('/api/profile/stats', isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const stats = await storage.getUserStats(userId);
+      res.json(stats);
+    } catch (error) {
+      console.error("Error fetching user stats:", error);
+      res.status(500).json({ message: "Failed to fetch user stats" });
+    }
+  });
+
   // Card routes
   app.get('/api/cards', async (req, res) => {
     try {
-      const cards = await storage.getCards();
+      const cards = await storage.getAllCards();
       res.json(cards);
     } catch (error) {
       console.error("Error fetching cards:", error);
@@ -41,22 +47,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post('/api/cards', isAuthenticated, async (req, res) => {
-    try {
-      const cardData = insertCardSchema.parse(req.body);
-      const card = await storage.createCard(cardData);
-      res.json(card);
-    } catch (error) {
-      console.error("Error creating card:", error);
-      res.status(500).json({ message: "Failed to create card" });
-    }
-  });
-
-  // User collection routes
   app.get('/api/collection', isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user.claims.sub;
-      const collection = await storage.getUserCards(userId);
+      const collection = await storage.getUserCollection(userId);
       res.json(collection);
     } catch (error) {
       console.error("Error fetching collection:", error);
@@ -79,104 +73,137 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post('/api/decks', isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user.claims.sub;
-      const deckData = insertDeckSchema.parse({ ...req.body, userId });
-      const deck = await storage.createDeck(deckData);
+      const deckData = insertDeckSchema.parse(req.body);
+      const deck = await storage.createDeck({ ...deckData, userId });
       res.json(deck);
     } catch (error) {
       console.error("Error creating deck:", error);
-      res.status(500).json({ message: "Failed to create deck" });
+      res.status(400).json({ message: "Failed to create deck" });
     }
   });
 
-  app.get('/api/decks/:id', isAuthenticated, async (req, res) => {
+  app.put('/api/decks/:id', isAuthenticated, async (req: any, res) => {
     try {
+      const userId = req.user.claims.sub;
       const deckId = parseInt(req.params.id);
-      const deck = await storage.getDeck(deckId);
-      if (!deck) {
-        return res.status(404).json({ message: "Deck not found" });
-      }
+      const deckData = insertDeckSchema.parse(req.body);
+      const deck = await storage.updateDeck(deckId, userId, deckData);
       res.json(deck);
     } catch (error) {
-      console.error("Error fetching deck:", error);
-      res.status(500).json({ message: "Failed to fetch deck" });
+      console.error("Error updating deck:", error);
+      res.status(400).json({ message: "Failed to update deck" });
     }
   });
 
-  app.post('/api/decks/:id/cards', isAuthenticated, async (req, res) => {
+  app.delete('/api/decks/:id', isAuthenticated, async (req: any, res) => {
     try {
+      const userId = req.user.claims.sub;
       const deckId = parseInt(req.params.id);
-      const { cardId, quantity = 1 } = req.body;
-      const deckCard = await storage.addCardToDeck(deckId, cardId, quantity);
-      res.json(deckCard);
+      await storage.deleteDeck(deckId, userId);
+      res.json({ message: "Deck deleted successfully" });
     } catch (error) {
-      console.error("Error adding card to deck:", error);
-      res.status(500).json({ message: "Failed to add card to deck" });
-    }
-  });
-
-  app.delete('/api/decks/:deckId/cards/:cardId', isAuthenticated, async (req, res) => {
-    try {
-      const deckId = parseInt(req.params.deckId);
-      const cardId = parseInt(req.params.cardId);
-      await storage.removeCardFromDeck(deckId, cardId);
-      res.json({ message: "Card removed from deck" });
-    } catch (error) {
-      console.error("Error removing card from deck:", error);
-      res.status(500).json({ message: "Failed to remove card from deck" });
+      console.error("Error deleting deck:", error);
+      res.status(400).json({ message: "Failed to delete deck" });
     }
   });
 
   // Game routes
-  app.post('/api/games', isAuthenticated, async (req: any, res) => {
+  app.post('/api/games/ai', isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user.claims.sub;
-      const gameData = insertGameSchema.parse({ 
-        ...req.body, 
+      const { difficulty, deckId } = req.body;
+      
+      if (!['easy', 'medium', 'hard'].includes(difficulty)) {
+        return res.status(400).json({ message: "Invalid difficulty level" });
+      }
+
+      const deck = await storage.getDeck(deckId, userId);
+      if (!deck) {
+        return res.status(400).json({ message: "Deck not found" });
+      }
+
+      const gameData = insertGameSchema.parse({
         player1Id: userId,
-        gameState: {
-          player1: { health: 100, hand: [], units: [], commands: [], commandPoints: 0 },
-          player2: { health: 100, hand: [], units: [], commands: [], commandPoints: 0 },
-          currentPhase: "Command Phase",
-          turnNumber: 1
-        }
+        isAIGame: true,
+        aiDifficulty: difficulty,
+        currentPlayer: userId,
+        gameState: await gameEngine.initializeGame(deck, difficulty),
       });
+
       const game = await storage.createGame(gameData);
       res.json(game);
     } catch (error) {
-      console.error("Error creating game:", error);
-      res.status(500).json({ message: "Failed to create game" });
+      console.error("Error creating AI game:", error);
+      res.status(400).json({ message: "Failed to create AI game" });
     }
   });
 
-  app.get('/api/games/:id', isAuthenticated, async (req, res) => {
+  app.get('/api/games/:id', isAuthenticated, async (req: any, res) => {
     try {
-      const gameId = req.params.id;
-      const game = await storage.getGame(gameId);
-      if (!game) {
-        return res.status(404).json({ message: "Game not found" });
-      }
+      const userId = req.user.claims.sub;
+      const gameId = parseInt(req.params.id);
+      const game = await storage.getGame(gameId, userId);
       res.json(game);
     } catch (error) {
       console.error("Error fetching game:", error);
-      res.status(500).json({ message: "Failed to fetch game" });
+      res.status(404).json({ message: "Game not found" });
     }
   });
 
-  app.get('/api/games', isAuthenticated, async (req: any, res) => {
+  app.post('/api/games/:id/action', isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user.claims.sub;
-      const games = await storage.getUserGames(userId);
-      res.json(games);
+      const gameId = parseInt(req.params.id);
+      const { action, data } = req.body;
+
+      const game = await storage.getGame(gameId, userId);
+      if (!game) {
+        return res.status(404).json({ message: "Game not found" });
+      }
+
+      if (game.currentPlayer !== userId) {
+        return res.status(400).json({ message: "Not your turn" });
+      }
+
+      let newGameState;
+      if (game.isAIGame) {
+        newGameState = await gameEngine.processPlayerAction(game.gameState, action, data);
+        if (newGameState.currentPlayer !== userId) {
+          // AI turn
+          const aiAction = await aiEngine.getAIAction(newGameState, game.aiDifficulty);
+          newGameState = await gameEngine.processAIAction(newGameState, aiAction);
+        }
+      } else {
+        newGameState = await gameEngine.processPlayerAction(game.gameState, action, data);
+      }
+
+      const updatedGame = await storage.updateGameState(gameId, newGameState);
+      
+      // Broadcast to WebSocket clients if multiplayer
+      if (!game.isAIGame && gameClients.has(gameId)) {
+        const clients = gameClients.get(gameId)!;
+        clients.forEach(client => {
+          if (client.readyState === WebSocket.OPEN) {
+            client.send(JSON.stringify({
+              type: 'gameUpdate',
+              game: updatedGame
+            }));
+          }
+        });
+      }
+
+      res.json(updatedGame);
     } catch (error) {
-      console.error("Error fetching games:", error);
-      res.status(500).json({ message: "Failed to fetch games" });
+      console.error("Error processing game action:", error);
+      res.status(400).json({ message: "Failed to process action" });
     }
   });
 
   // Booster pack routes
-  app.get('/api/booster-packs', async (req, res) => {
+  app.get('/api/booster-packs', isAuthenticated, async (req: any, res) => {
     try {
-      const packs = await storage.getBoosterPacks();
+      const userId = req.user.claims.sub;
+      const packs = await storage.getUserBoosterPacks(userId);
       res.json(packs);
     } catch (error) {
       console.error("Error fetching booster packs:", error);
@@ -184,59 +211,74 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get('/api/user-booster-packs', isAuthenticated, async (req: any, res) => {
+  app.post('/api/booster-packs/purchase', isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user.claims.sub;
-      const packs = await storage.getUserBoosterPacks(userId);
+      const { packType, quantity = 1 } = req.body;
+      
+      const cost = packType === 'premium' ? 500 : 200;
+      const totalCost = cost * quantity;
+
+      const user = await storage.getUser(userId);
+      if (!user || user.credits < totalCost) {
+        return res.status(400).json({ message: "Insufficient credits" });
+      }
+
+      const packs = [];
+      for (let i = 0; i < quantity; i++) {
+        const packData = insertBoosterPackSchema.parse({
+          userId,
+          packType,
+        });
+        const pack = await storage.createBoosterPack(packData);
+        packs.push(pack);
+      }
+
+      await storage.updateUserCredits(userId, user.credits - totalCost);
       res.json(packs);
     } catch (error) {
-      console.error("Error fetching user booster packs:", error);
-      res.status(500).json({ message: "Failed to fetch user booster packs" });
-    }
-  });
-
-  app.post('/api/purchase-booster', isAuthenticated, async (req: any, res) => {
-    try {
-      const userId = req.user.claims.sub;
-      const { boosterPackId } = req.body;
-      const pack = await storage.purchaseBoosterPack(userId, boosterPackId);
-      res.json(pack);
-    } catch (error) {
       console.error("Error purchasing booster pack:", error);
-      res.status(500).json({ message: "Failed to purchase booster pack" });
+      res.status(400).json({ message: "Failed to purchase booster pack" });
     }
   });
 
-  app.post('/api/open-booster/:id', isAuthenticated, async (req: any, res) => {
+  app.post('/api/booster-packs/:id/open', isAuthenticated, async (req: any, res) => {
     try {
-      const userBoosterPackId = parseInt(req.params.id);
       const userId = req.user.claims.sub;
-      const cards = await storage.openBoosterPack(userBoosterPackId);
+      const packId = parseInt(req.params.id);
+      
+      const pack = await storage.getBoosterPack(packId, userId);
+      if (!pack || pack.isOpened) {
+        return res.status(400).json({ message: "Pack not found or already opened" });
+      }
+
+      const cards = await storage.generateBoosterPackCards(pack.packType);
+      const openedPack = await storage.openBoosterPack(packId, cards);
       
       // Add cards to user collection
-      for (const card of cards) {
-        await storage.addCardToUser(userId, card.id);
+      for (const cardId of cards) {
+        await storage.addCardToCollection(userId, cardId);
       }
-      
-      res.json(cards);
+
+      res.json({ pack: openedPack, cards });
     } catch (error) {
       console.error("Error opening booster pack:", error);
-      res.status(500).json({ message: "Failed to open booster pack" });
+      res.status(400).json({ message: "Failed to open booster pack" });
     }
   });
 
-  // Leaderboard routes
-  app.get('/api/leaderboard', async (req, res) => {
+  // Rankings route
+  app.get('/api/rankings', async (req, res) => {
     try {
-      const leaderboard = await storage.getLeaderboard();
-      res.json(leaderboard);
+      const rankings = await storage.getUserRankings();
+      res.json(rankings);
     } catch (error) {
-      console.error("Error fetching leaderboard:", error);
-      res.status(500).json({ message: "Failed to fetch leaderboard" });
+      console.error("Error fetching rankings:", error);
+      res.status(500).json({ message: "Failed to fetch rankings" });
     }
   });
 
-  // Achievement routes
+  // Achievements routes
   app.get('/api/achievements', isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user.claims.sub;
@@ -248,63 +290,60 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Create HTTP server
   const httpServer = createServer(app);
 
-  // WebSocket setup for real-time multiplayer
+  // WebSocket setup for multiplayer
   const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
+  const gameClients = new Map<number, Set<WebSocket>>();
 
-  wss.on('connection', (socket: WebSocket, request) => {
-    console.log('New WebSocket connection');
-    
-    socket.on('message', async (data) => {
+  wss.on('connection', (ws, req) => {
+    console.log('WebSocket connection established');
+
+    ws.on('message', async (message) => {
       try {
-        const message = JSON.parse(data.toString());
+        const data = JSON.parse(message.toString());
         
-        switch (message.type) {
-          case 'join_game':
-            const { gameId, userId } = message;
-            gameConnections.set(userId, { socket, userId, gameId });
-            socket.send(JSON.stringify({ type: 'joined_game', gameId }));
-            break;
-            
-          case 'game_move':
-            const { move, gameId: moveGameId } = message;
-            // Broadcast move to other players in the game
-            for (const [connUserId, conn] of gameConnections) {
-              if (conn.gameId === moveGameId && conn.socket !== socket && conn.socket.readyState === WebSocket.OPEN) {
-                conn.socket.send(JSON.stringify({ type: 'opponent_move', move }));
-              }
+        switch (data.type) {
+          case 'joinGame':
+            const gameId = data.gameId;
+            if (!gameClients.has(gameId)) {
+              gameClients.set(gameId, new Set());
             }
-            break;
+            gameClients.get(gameId)!.add(ws);
             
-          case 'chat_message':
-            const { gameId: chatGameId, message: chatMessage, sender } = message;
-            // Broadcast chat to other players in the game
-            for (const [connUserId, conn] of gameConnections) {
-              if (conn.gameId === chatGameId && conn.socket.readyState === WebSocket.OPEN) {
-                conn.socket.send(JSON.stringify({ 
-                  type: 'chat_message', 
-                  message: chatMessage, 
-                  sender, 
-                  timestamp: new Date().toISOString() 
-                }));
-              }
-            }
+            ws.send(JSON.stringify({
+              type: 'gameJoined',
+              gameId
+            }));
             break;
+
+          case 'leaveGame':
+            gameClients.forEach((clients, gameId) => {
+              clients.delete(ws);
+              if (clients.size === 0) {
+                gameClients.delete(gameId);
+              }
+            });
+            break;
+
+          default:
+            console.log('Unknown WebSocket message type:', data.type);
         }
       } catch (error) {
         console.error('WebSocket message error:', error);
       }
     });
 
-    socket.on('close', () => {
-      // Remove connection
-      for (const [userId, conn] of gameConnections) {
-        if (conn.socket === socket) {
-          gameConnections.delete(userId);
-          break;
+    ws.on('close', () => {
+      // Clean up client from all games
+      gameClients.forEach((clients, gameId) => {
+        clients.delete(ws);
+        if (clients.size === 0) {
+          gameClients.delete(gameId);
         }
-      }
+      });
+      console.log('WebSocket connection closed');
     });
   });
 

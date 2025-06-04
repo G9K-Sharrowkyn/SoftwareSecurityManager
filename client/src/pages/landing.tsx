@@ -1,6 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Rocket, Star, Trophy, Users, Zap, Shield } from "lucide-react";
+import { Rocket, Sword, Trophy, Users } from "lucide-react";
 
 export default function Landing() {
   const handleLogin = () => {
@@ -8,100 +8,90 @@ export default function Landing() {
   };
 
   return (
-    <div className="min-h-screen relative overflow-hidden">
+    <div className="min-h-screen flex flex-col">
+      {/* Header */}
+      <header className="bg-black/20 backdrop-blur-sm border-b border-primary/30 p-4">
+        <div className="container mx-auto flex justify-between items-center">
+          <div className="flex items-center space-x-3">
+            <Rocket className="h-8 w-8 text-primary" />
+            <h1 className="text-2xl font-bold text-primary text-glow">Proteus Nebula</h1>
+          </div>
+          <Button onClick={handleLogin} className="btn-cosmic">
+            Sign In
+          </Button>
+        </div>
+      </header>
+
       {/* Hero Section */}
-      <div className="relative z-10 flex flex-col items-center justify-center min-h-screen px-4 text-center">
-        <div className="mb-8">
-          <Rocket className="w-16 h-16 text-primary mx-auto mb-4 cosmic-float" />
-          <h1 className="cosmic-title mb-6">
-            Proteus Nebula
-          </h1>
-          <p className="text-xl md:text-2xl text-muted-foreground max-w-3xl mx-auto mb-8">
-            Command your fleet across the cosmic battlefields. Collect powerful cards, 
-            build strategic decks, and dominate the galaxy in this epic space card battle game.
-          </p>
+      <main className="flex-1 flex flex-col items-center justify-center text-center p-8">
+        <div className="max-w-4xl mx-auto space-y-8">
+          <div className="space-y-4">
+            <h2 className="text-6xl md:text-8xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-primary to-accent">
+              Proteus Nebula
+            </h2>
+            <p className="text-xl md:text-2xl text-muted-foreground max-w-2xl mx-auto">
+              Command your fleet across the cosmic battlefields. Collect powerful cards, build strategic decks, and dominate the galaxy.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap justify-center gap-4">
+            <Button onClick={handleLogin} size="lg" className="btn-cosmic text-lg px-8 py-4">
+              <Rocket className="mr-2 h-5 w-5" />
+              Launch Into Battle
+            </Button>
+          </div>
+
+          {/* Features Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-16">
+            <Card className="bg-card/50 backdrop-blur-sm border-primary/20 hover:border-primary/50 transition-all duration-300">
+              <CardHeader>
+                <CardTitle className="flex items-center text-primary">
+                  <Sword className="mr-2 h-5 w-5" />
+                  Strategic Combat
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <CardDescription>
+                  Master the three-phase battle system: Command, Deployment, and Battle phases each require different strategies.
+                </CardDescription>
+              </CardContent>
+            </Card>
+
+            <Card className="bg-card/50 backdrop-blur-sm border-primary/20 hover:border-primary/50 transition-all duration-300">
+              <CardHeader>
+                <CardTitle className="flex items-center text-primary">
+                  <Users className="mr-2 h-5 w-5" />
+                  Multiplayer & AI
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <CardDescription>
+                  Challenge other commanders in ranked matches or hone your skills against intelligent AI opponents.
+                </CardDescription>
+              </CardContent>
+            </Card>
+
+            <Card className="bg-card/50 backdrop-blur-sm border-primary/20 hover:border-primary/50 transition-all duration-300">
+              <CardHeader>
+                <CardTitle className="flex items-center text-primary">
+                  <Trophy className="mr-2 h-5 w-5" />
+                  Collect & Build
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <CardDescription>
+                  Open booster packs, collect rare cards, and build the ultimate deck to climb the galactic rankings.
+                </CardDescription>
+              </CardContent>
+            </Card>
+          </div>
         </div>
+      </main>
 
-        <div className="flex flex-col sm:flex-row gap-4 mb-12">
-          <Button 
-            onClick={handleLogin}
-            size="lg"
-            className="cosmic-button text-lg px-8 py-4"
-          >
-            <Rocket className="w-5 h-5 mr-2" />
-            Launch Into Battle
-          </Button>
-          <Button 
-            variant="outline" 
-            size="lg"
-            className="cosmic-button-secondary text-lg px-8 py-4"
-          >
-            <Star className="w-5 h-5 mr-2" />
-            Watch Trailer
-          </Button>
-        </div>
-
-        {/* Features Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl mx-auto">
-          <Card className="cosmic-card">
-            <CardHeader className="text-center">
-              <Zap className="w-12 h-12 text-primary mx-auto mb-2" />
-              <CardTitle className="text-primary">Strategic Combat</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <CardDescription className="text-center">
-                Master the 3-phase battle system: Command, Deployment, and Battle. 
-                Every decision shapes the cosmic war.
-              </CardDescription>
-            </CardContent>
-          </Card>
-
-          <Card className="cosmic-card">
-            <CardHeader className="text-center">
-              <Shield className="w-12 h-12 text-primary mx-auto mb-2" />
-              <CardTitle className="text-primary">Collect & Build</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <CardDescription className="text-center">
-                Gather hundreds of unique cards featuring starships, space stations, 
-                and alien technologies. Build the ultimate deck.
-              </CardDescription>
-            </CardContent>
-          </Card>
-
-          <Card className="cosmic-card">
-            <CardHeader className="text-center">
-              <Users className="w-12 h-12 text-primary mx-auto mb-2" />
-              <CardTitle className="text-primary">Multiplayer Battles</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <CardDescription className="text-center">
-                Challenge commanders from across the galaxy in ranked battles, 
-                or test your skills against advanced AI opponents.
-              </CardDescription>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
-
-      {/* Bottom CTA */}
-      <div className="relative z-10 py-16 px-4 text-center bg-gradient-to-t from-muted/50 to-transparent">
-        <h2 className="text-3xl font-bold text-primary mb-4">
-          Ready to Command the Stars?
-        </h2>
-        <p className="text-lg text-muted-foreground mb-8 max-w-2xl mx-auto">
-          Join thousands of space commanders in the ultimate card battle experience. 
-          Your fleet awaits your command.
-        </p>
-        <Button 
-          onClick={handleLogin}
-          size="lg"
-          className="cosmic-button text-lg px-12 py-4"
-        >
-          <Trophy className="w-5 h-5 mr-2" />
-          Begin Your Journey
-        </Button>
-      </div>
+      {/* Footer */}
+      <footer className="bg-black/20 backdrop-blur-sm border-t border-primary/30 p-4 text-center text-muted-foreground">
+        <p>&copy; 2024 Proteus Nebula. Command the Stars.</p>
+      </footer>
     </div>
   );
 }

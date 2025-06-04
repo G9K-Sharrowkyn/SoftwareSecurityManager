@@ -1,264 +1,193 @@
-import { useQuery } from "@tanstack/react-query";
-import { Link } from "wouter";
+import { useState } from "react";
+import { useAuth } from "@/hooks/useAuth";
+import { useQuery, useMutation, queryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Progress } from "@/components/ui/progress";
 import Navigation from "@/components/ui/navigation";
-import { useAuth } from "@/hooks/useAuth";
-import { 
-  Sword, 
-  Trophy, 
-  Group, 
-  Layers, 
-  Gift, 
-  TrendingUp, 
-  Star,
-  Zap,
-  Target,
-  Users
-} from "lucide-react";
+import { Rocket, Sword, Trophy, Users, Gift, Layers, Play, Bot } from "lucide-react";
+import { useLocation } from "wouter";
+import { apiRequest } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
 
 export default function Home() {
   const { user } = useAuth();
-  
+  const [, setLocation] = useLocation();
+  const { toast } = useToast();
+
+  const { data: leaderboard } = useQuery({
+    queryKey: ["/api/leaderboard"],
+  });
+
   const { data: userStats } = useQuery({
-    queryKey: ["/api/user/stats"],
-    enabled: !!user,
+    queryKey: ["/api/collection"],
   });
 
-  const { data: userGames } = useQuery({
-    queryKey: ["/api/user/games"],
-    enabled: !!user,
+  const createGameMutation = useMutation({
+    mutationFn: async (gameType: string) => {
+      const response = await apiRequest("POST", "/api/games", { gameType });
+      return response.json();
+    },
+    onSuccess: (game) => {
+      setLocation(`/game/${game.id}`);
+    },
+    onError: (error) => {
+      toast({
+        title: "Error",
+        description: "Failed to create game",
+        variant: "destructive",
+      });
+    },
   });
 
-  const { data: boosterPacks } = useQuery({
-    queryKey: ["/api/user/booster-packs"],
-    enabled: !!user,
+  const createBoosterMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest("POST", "/api/booster-packs");
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/booster-packs"] });
+      toast({
+        title: "Success",
+        description: "Booster pack added to your collection!",
+        variant: "default",
+      });
+    },
   });
 
-  const availablePacks = boosterPacks?.filter(pack => !pack.isOpened)?.length || 0;
-  const experienceToNext = 1000; // This would be calculated based on level
-  const currentExp = user?.experience || 0;
-  const expProgress = (currentExp % experienceToNext) / experienceToNext * 100;
+  const handleQuickMatch = () => {
+    createGameMutation.mutate('ai');
+  };
+
+  const handleRankedMatch = () => {
+    createGameMutation.mutate('ranked');
+  };
+
+  const winRate = user?.wins && user?.losses 
+    ? Math.round((user.wins / (user.wins + user.losses)) * 100)
+    : 0;
 
   return (
     <div className="min-h-screen">
       <Navigation />
       
-      <main className="container mx-auto px-4 py-8 relative z-10">
-        {/* Hero Section */}
-        <div className="text-center mb-12">
-          <h1 className="text-4xl md:text-6xl font-bold text-primary mb-4 cosmic-text-glow">
+      <main className="container mx-auto p-6 space-y-8">
+        {/* Welcome Section */}
+        <div className="text-center space-y-4">
+          <h1 className="text-4xl md:text-6xl font-bold text-glow">
             Welcome Back, Commander
           </h1>
-          <p className="text-xl text-muted-foreground mb-8">
-            Your fleet awaits your command. Choose your next mission.
+          <p className="text-xl text-muted-foreground">
+            Ready to command your fleet and conquer the galaxy?
           </p>
         </div>
 
-        {/* Quick Stats */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-          <Card className="cosmic-card">
-            <CardContent className="p-6 text-center">
-              <Trophy className="w-8 h-8 text-primary mx-auto mb-2" />
-              <div className="text-2xl font-bold text-primary">{user?.level || 1}</div>
-              <div className="text-sm text-muted-foreground">Level</div>
-            </CardContent>
+        {/* Quick Actions */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          <Card className="bg-gradient-to-br from-red-900/30 to-red-800/30 border-red-500/30 hover:border-red-400 transition-all duration-300 cursor-pointer" 
+                onClick={handleQuickMatch}>
+            <CardHeader className="text-center">
+              <div className="w-16 h-16 bg-gradient-to-r from-red-500 to-red-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                <Bot className="h-8 w-8 text-white" />
+              </div>
+              <CardTitle className="text-red-400">Quick Match</CardTitle>
+              <CardDescription>Battle against AI opponents</CardDescription>
+            </CardHeader>
           </Card>
-          
-          <Card className="cosmic-card">
-            <CardContent className="p-6 text-center">
-              <Target className="w-8 h-8 text-green-500 mx-auto mb-2" />
-              <div className="text-2xl font-bold text-green-500">{userStats?.winRate || 0}%</div>
-              <div className="text-sm text-muted-foreground">Win Rate</div>
-            </CardContent>
+
+          <Card className="bg-gradient-to-br from-primary/30 to-amber-500/30 border-primary/30 hover:border-primary transition-all duration-300 cursor-pointer"
+                onClick={handleRankedMatch}>
+            <CardHeader className="text-center">
+              <div className="w-16 h-16 bg-gradient-to-r from-primary to-amber-500 rounded-full flex items-center justify-center mx-auto mb-4">
+                <Trophy className="h-8 w-8 text-primary-foreground" />
+              </div>
+              <CardTitle className="text-primary">Ranked Battle</CardTitle>
+              <CardDescription>Compete for galactic supremacy</CardDescription>
+            </CardHeader>
           </Card>
-          
-          <Card className="cosmic-card">
-            <CardContent className="p-6 text-center">
-              <Group className="w-8 h-8 text-blue-500 mx-auto mb-2" />
-              <div className="text-2xl font-bold text-blue-500">{userStats?.cardsCollected || 0}</div>
-              <div className="text-sm text-muted-foreground">Cards</div>
-            </CardContent>
+
+          <Card className="bg-gradient-to-br from-blue-900/30 to-blue-800/30 border-blue-500/30 hover:border-blue-400 transition-all duration-300 cursor-pointer"
+                onClick={() => setLocation("/collection")}>
+            <CardHeader className="text-center">
+              <div className="w-16 h-16 bg-gradient-to-r from-blue-500 to-blue-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                <Layers className="h-8 w-8 text-white" />
+              </div>
+              <CardTitle className="text-blue-400">Collection</CardTitle>
+              <CardDescription>Browse your card collection</CardDescription>
+            </CardHeader>
           </Card>
-          
-          <Card className="cosmic-card">
-            <CardContent className="p-6 text-center">
-              <Gift className="w-8 h-8 text-purple-500 mx-auto mb-2" />
-              <div className="text-2xl font-bold text-purple-500">{availablePacks}</div>
-              <div className="text-sm text-muted-foreground">Packs</div>
-            </CardContent>
+
+          <Card className="bg-gradient-to-br from-purple-900/30 to-purple-800/30 border-purple-500/30 hover:border-purple-400 transition-all duration-300 cursor-pointer"
+                onClick={() => createBoosterMutation.mutate()}>
+            <CardHeader className="text-center">
+              <div className="w-16 h-16 bg-gradient-to-r from-purple-500 to-purple-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                <Gift className="h-8 w-8 text-white" />
+              </div>
+              <CardTitle className="text-purple-400">Booster Pack</CardTitle>
+              <CardDescription>Get a free booster pack</CardDescription>
+            </CardHeader>
           </Card>
         </div>
 
-        {/* Experience Progress */}
-        <Card className="cosmic-card mb-8">
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-sm font-medium">Level Progress</span>
-              <span className="text-sm text-muted-foreground">
-                Level {user?.level || 1} • {user?.experience || 0} / {experienceToNext} XP
-              </span>
+        {/* Player Stats */}
+        <Card className="bg-gradient-to-r from-card/50 to-primary/10 border-primary/20">
+          <CardHeader>
+            <CardTitle className="text-center text-primary">Commander Statistics</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-6 text-center">
+              <div>
+                <div className="text-3xl font-bold text-primary">{user?.level || 1}</div>
+                <div className="text-muted-foreground">Level</div>
+              </div>
+              <div>
+                <div className="text-3xl font-bold text-primary">{user?.wins || 0}</div>
+                <div className="text-muted-foreground">Wins</div>
+              </div>
+              <div>
+                <div className="text-3xl font-bold text-primary">{winRate}%</div>
+                <div className="text-muted-foreground">Win Rate</div>
+              </div>
+              <div>
+                <div className="text-3xl font-bold text-primary">{user?.experience || 0}</div>
+                <div className="text-muted-foreground">Experience</div>
+              </div>
+              <div>
+                <div className="text-3xl font-bold text-primary">{user?.credits || 0}</div>
+                <div className="text-muted-foreground">Credits</div>
+              </div>
             </div>
-            <Progress value={expProgress} className="h-3" />
           </CardContent>
         </Card>
 
-        {/* Game Modes */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
-          {/* Quick Battle */}
-          <Card className="cosmic-card group cursor-pointer hover:scale-105 transition-all duration-300">
-            <CardHeader className="text-center">
-              <div className="w-16 h-16 bg-gradient-to-r from-red-500 to-red-600 rounded-full flex items-center justify-center mx-auto mb-4 group-hover:scale-110 transition-transform">
-                <Sword className="w-8 h-8 text-white" />
-              </div>
-              <CardTitle className="text-primary">Quick Battle</CardTitle>
-            </CardHeader>
-            <CardContent className="text-center">
-              <CardDescription className="mb-4">
-                Jump into battle against AI opponents with varying difficulty levels
-              </CardDescription>
-              <div className="flex justify-center space-x-2 mb-4">
-                <Badge variant="secondary" className="bg-green-600 text-white">Easy</Badge>
-                <Badge variant="secondary" className="bg-yellow-600 text-white">Medium</Badge>
-                <Badge variant="secondary" className="bg-red-600 text-white">Hard</Badge>
-              </div>
-              <Link href="/game">
-                <Button className="w-full cosmic-button">
-                  <Zap className="w-4 h-4 mr-2" />
-                  Start Battle
-                </Button>
-              </Link>
-            </CardContent>
-          </Card>
-
-          {/* Ranked Battle */}
-          <Card className="cosmic-card group cursor-pointer hover:scale-105 transition-all duration-300">
-            <CardHeader className="text-center">
-              <div className="w-16 h-16 bg-gradient-to-r from-primary to-yellow-400 rounded-full flex items-center justify-center mx-auto mb-4 group-hover:scale-110 transition-transform">
-                <Trophy className="w-8 h-8 text-black" />
-              </div>
-              <CardTitle className="text-primary">Ranked Battle</CardTitle>
-            </CardHeader>
-            <CardContent className="text-center">
-              <CardDescription className="mb-4">
-                Compete against other commanders for galactic supremacy
-              </CardDescription>
-              <Badge className="mb-4 bg-gradient-to-r from-primary to-yellow-400 text-black">
-                Current Rank: {user?.currentRank || "Recruit"}
-              </Badge>
-              <Button className="w-full cosmic-button" disabled>
-                <Users className="w-4 h-4 mr-2" />
-                Find Match (Coming Soon)
-              </Button>
-            </CardContent>
-          </Card>
-
-          {/* Group */}
-          <Card className="cosmic-card group cursor-pointer hover:scale-105 transition-all duration-300">
-            <CardHeader className="text-center">
-              <div className="w-16 h-16 bg-gradient-to-r from-blue-500 to-blue-600 rounded-full flex items-center justify-center mx-auto mb-4 group-hover:scale-110 transition-transform">
-                <Group className="w-8 h-8 text-white" />
-              </div>
-              <CardTitle className="text-primary">Group</CardTitle>
-            </CardHeader>
-            <CardContent className="text-center">
-              <CardDescription className="mb-4">
-                Browse your card collection and manage your fleet
-              </CardDescription>
-              <div className="text-primary font-semibold mb-4">
-                {userStats?.cardsCollected || 0} Cards Collected
-              </div>
-              <Link href="/collection">
-                <Button className="w-full cosmic-button-secondary">
-                  <Layers className="w-4 h-4 mr-2" />
-                  View Group
-                </Button>
-              </Link>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Recent Activity & Quick Actions */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Recent Games */}
-          <Card className="cosmic-card">
-            <CardHeader>
-              <CardTitle className="text-primary flex items-center">
-                <TrendingUp className="w-5 h-5 mr-2" />
-                Recent Battles
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              {userGames && userGames.length > 0 ? (
-                <div className="space-y-3">
-                  {userGames.slice(0, 5).map((game) => (
-                    <div key={game.id} className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
-                      <div>
-                        <div className="font-medium">
-                          {game.gameType === 'ai' ? 'AI Battle' : 'Ranked Match'}
-                        </div>
-                        <div className="text-sm text-muted-foreground">
-                          {new Date(game.startedAt).toLocaleDateString()}
-                        </div>
-                      </div>
-                      <Badge 
-                        variant={game.winnerId === user?.id ? "default" : "destructive"}
-                        className={game.winnerId === user?.id ? "bg-green-600" : ""}
-                      >
-                        {game.winnerId === user?.id ? "Victory" : "Defeat"}
-                      </Badge>
+        {/* Leaderboard */}
+        <Card className="bg-card/50 border-primary/20">
+          <CardHeader>
+            <CardTitle className="text-primary">Galactic Leaderboard</CardTitle>
+            <CardDescription>Top commanders in the galaxy</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              {leaderboard?.slice(0, 5).map((player: any, index: number) => (
+                <div key={player.id} className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
+                  <div className="flex items-center space-x-3">
+                    <Badge variant={index < 3 ? "default" : "secondary"} className="w-8 h-8 rounded-full flex items-center justify-center">
+                      {index + 1}
+                    </Badge>
+                    <div>
+                      <div className="font-semibold">{player.firstName || `Commander ${player.id.slice(-4)}`}</div>
+                      <div className="text-sm text-muted-foreground">Level {player.level}</div>
                     </div>
-                  ))}
+                  </div>
+                  <div className="text-right">
+                    <div className="font-bold text-primary">{player.wins} wins</div>
+                    <div className="text-sm text-muted-foreground">{player.experience} XP</div>
+                  </div>
                 </div>
-              ) : (
-                <div className="text-center py-8 text-muted-foreground">
-                  <Sword className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                  <p>No battles yet. Start your first game!</p>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Quick Actions */}
-          <Card className="cosmic-card">
-            <CardHeader>
-              <CardTitle className="text-primary flex items-center">
-                <Star className="w-5 h-5 mr-2" />
-                Quick Actions
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <Link href="/deck-builder">
-                <Button className="w-full cosmic-button-secondary justify-start">
-                  <Layers className="w-4 h-4 mr-2" />
-                  Build Deck
-                </Button>
-              </Link>
-              
-              <Button 
-                className="w-full cosmic-button-secondary justify-start"
-                disabled={availablePacks === 0}
-              >
-                <Gift className="w-4 h-4 mr-2" />
-                Open Booster Pack ({availablePacks})
-              </Button>
-              
-              <Link href="/rankings">
-                <Button className="w-full cosmic-button-secondary justify-start">
-                  <Trophy className="w-4 h-4 mr-2" />
-                  View Rankings
-                </Button>
-              </Link>
-              
-              <Button className="w-full cosmic-button justify-start">
-                <Star className="w-4 h-4 mr-2" />
-                Daily Challenge (Coming Soon)
-              </Button>
-            </CardContent>
-          </Card>
-        </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
       </main>
     </div>
   );

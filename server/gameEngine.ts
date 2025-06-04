@@ -1,240 +1,412 @@
+import { cardsSpecifics } from "../client/src/components/game/CardsSpecifics";
+
+export const Phases = {
+  COMMAND: "Command Phase",
+  DEPLOYMENT: "Deployment Phase", 
+  BATTLE: "Battle Phase",
+  END_TURN: "End Turn",
+};
+
 export interface GameState {
-  gameId: string;
-  players: {
-    [playerId: string]: {
-      health: number;
-      hand: number[];
-      deck: number[];
-      graveyard: number[];
-      commandZone: number[];
-      unitZone: number[];
-      commandPoints: number;
-      hasDrawnCard: boolean;
-      hasPlayedCommandCard: boolean;
-    };
-  };
-  currentPhase: 'Command Phase' | 'Deployment Phase' | 'Battle Phase' | 'End Turn';
-  currentPlayerId: string;
+  gameId?: number;
+  currentPhase: string;
+  currentPlayer: string;
   turnNumber: number;
-  gameStatus: 'waiting' | 'active' | 'finished';
-  winnerId?: string;
+  playerStates: {
+    [playerId: string]: PlayerState;
+  };
+  battleQueue: BattleAction[];
+  isGameOver: boolean;
+  winner?: string;
 }
 
-export interface GameAction {
-  type: string;
-  data: any;
+export interface PlayerState {
+  health: number;
+  deck: GameCard[];
+  hand: GameCard[];
+  commandZone: GameCard[];
+  unitZone: GameCard[];
+  graveyard: GameCard[];
+  commandPoints: number;
+  hasDrawnCard: boolean;
+  hasPlayedCommandCard: boolean;
 }
 
-export class GameEngine {
-  static createInitialGameState(): GameState {
-    return {
-      gameId: '',
-      players: {},
-      currentPhase: 'Command Phase',
-      currentPlayerId: '',
+export interface GameCard {
+  id: number;
+  name: string;
+  type: string[];
+  commandCost: number;
+  attack: number;
+  defense: number;
+  unitMembers: number;
+  redCounters: number;
+  blueCounters: number;
+  specialAbility: string;
+  imageUrl?: string;
+  instanceId: string; // Unique instance ID for this card in the game
+}
+
+export interface BattleAction {
+  attackerId: string;
+  targetId?: string;
+  damage: number;
+  type: 'unit' | 'direct';
+}
+
+class GameEngine {
+  async initializeGame(playerDeck: any, aiDifficulty?: string): Promise<GameState> {
+    const gameState: GameState = {
+      currentPhase: Phases.COMMAND,
+      currentPlayer: 'player1',
       turnNumber: 1,
-      gameStatus: 'waiting',
+      playerStates: {
+        player1: this.initializePlayerState(playerDeck),
+        ai: aiDifficulty ? this.initializeAIPlayerState(aiDifficulty) : this.initializePlayerState(playerDeck)
+      },
+      battleQueue: [],
+      isGameOver: false
     };
+
+    // Draw initial hands
+    this.drawInitialHand(gameState.playerStates.player1);
+    this.drawInitialHand(gameState.playerStates.ai);
+
+    return gameState;
   }
 
-  static initializePlayer(gameState: GameState, playerId: string, deck: number[]): GameState {
-    const shuffledDeck = [...deck].sort(() => Math.random() - 0.5);
-    const initialHand = shuffledDeck.splice(0, 7);
-
-    gameState.players[playerId] = {
+  private initializePlayerState(deck: any): PlayerState {
+    const gameCards = this.convertDeckToGameCards(deck.cards);
+    
+    return {
       health: 100,
-      hand: initialHand,
-      deck: shuffledDeck,
-      graveyard: [],
+      deck: this.shuffleDeck(gameCards),
+      hand: [],
       commandZone: [],
       unitZone: [],
+      graveyard: [],
       commandPoints: 0,
       hasDrawnCard: false,
-      hasPlayedCommandCard: false,
+      hasPlayedCommandCard: false
     };
-
-    if (!gameState.currentPlayerId) {
-      gameState.currentPlayerId = playerId;
-    }
-
-    return gameState;
   }
 
-  static processAction(gameState: GameState, actionType: string, actionData: any): GameState {
-    const newState = JSON.parse(JSON.stringify(gameState)); // Deep clone
-    const currentPlayer = newState.players[newState.currentPlayerId];
+  private initializeAIPlayerState(difficulty: string): PlayerState {
+    // Generate AI deck based on difficulty
+    const aiDeck = this.generateAIDeck(difficulty);
+    return this.initializePlayerState({ cards: aiDeck });
+  }
 
-    switch (actionType) {
-      case 'DRAW_CARD':
-        return this.handleDrawCard(newState);
+  private convertDeckToGameCards(deckCards: {cardId: number, quantity: number}[]): GameCard[] {
+    const gameCards: GameCard[] = [];
+    
+    deckCards.forEach(({ cardId, quantity }) => {
+      const cardSpec = cardsSpecifics.find(c => c.name === cardId.toString()) || cardsSpecifics[0];
+      
+      for (let i = 0; i < quantity; i++) {
+        gameCards.push({
+          id: cardId,
+          name: cardSpec.name,
+          type: cardSpec.type,
+          commandCost: cardSpec.commandCost,
+          attack: cardSpec.attack,
+          defense: cardSpec.defense,
+          unitMembers: cardSpec.unitMembers,
+          redCounters: cardSpec.redCounters,
+          blueCounters: cardSpec.blueCounters,
+          specialAbility: cardSpec.specialAbility,
+          instanceId: `${cardId}_${Date.now()}_${Math.random()}`
+        });
+      }
+    });
 
-      case 'PLAY_CARD':
-        return this.handlePlayCard(newState, actionData);
+    return gameCards;
+  }
 
-      case 'END_PHASE':
-        return this.handleEndPhase(newState);
+  private generateAIDeck(difficulty: string): {cardId: number, quantity: number}[] {
+    // Generate balanced AI deck based on difficulty
+    const deck: {cardId: number, quantity: number}[] = [];
+    
+    // Add some shipyard cards (command zone)
+    deck.push({ cardId: 1, quantity: 4 }); // Shipyards
+    deck.push({ cardId: 2, quantity: 3 });
+    
+    // Add unit cards based on difficulty
+    if (difficulty === 'easy') {
+      // Weaker units
+      deck.push({ cardId: 10, quantity: 6 });
+      deck.push({ cardId: 11, quantity: 6 });
+    } else if (difficulty === 'medium') {
+      // Balanced units
+      deck.push({ cardId: 15, quantity: 4 });
+      deck.push({ cardId: 16, quantity: 4 });
+      deck.push({ cardId: 17, quantity: 4 });
+    } else {
+      // Strong units
+      deck.push({ cardId: 20, quantity: 3 });
+      deck.push({ cardId: 21, quantity: 3 });
+      deck.push({ cardId: 22, quantity: 3 });
+    }
 
-      case 'DEPLOY_UNIT':
-        return this.handleDeployUnit(newState, actionData);
+    return deck;
+  }
 
-      case 'ATTACK':
-        return this.handleAttack(newState, actionData);
+  private shuffleDeck(cards: GameCard[]): GameCard[] {
+    const shuffled = [...cards];
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+    return shuffled;
+  }
 
-      case 'USE_ABILITY':
-        return this.handleUseAbility(newState, actionData);
+  private drawInitialHand(playerState: PlayerState): void {
+    for (let i = 0; i < 7 && playerState.deck.length > 0; i++) {
+      const card = playerState.deck.shift()!;
+      playerState.hand.push(card);
+    }
+  }
+
+  async processPlayerAction(gameState: GameState, action: string, data: any): Promise<GameState> {
+    const newGameState = { ...gameState };
+    const currentPlayerState = newGameState.playerStates[newGameState.currentPlayer];
+
+    switch (action) {
+      case 'drawCard':
+        if (newGameState.currentPhase === Phases.COMMAND && !currentPlayerState.hasDrawnCard) {
+          this.drawCard(currentPlayerState);
+          currentPlayerState.hasDrawnCard = true;
+        }
+        break;
+
+      case 'playCard':
+        this.playCard(newGameState, data.cardInstanceId, data.targetZone);
+        break;
+
+      case 'endPhase':
+        this.endPhase(newGameState);
+        break;
+
+      case 'attack':
+        if (newGameState.currentPhase === Phases.BATTLE) {
+          this.processAttack(newGameState, data.attackerInstanceId, data.targetInstanceId);
+        }
+        break;
 
       default:
-        console.warn('Unknown action type:', actionType);
-        return newState;
+        console.log('Unknown action:', action);
+    }
+
+    // Check for game over conditions
+    this.checkGameOver(newGameState);
+
+    return newGameState;
+  }
+
+  async processAIAction(gameState: GameState, aiAction: any): Promise<GameState> {
+    // AI actions will be processed here
+    return this.processPlayerAction(gameState, aiAction.action, aiAction.data);
+  }
+
+  private drawCard(playerState: PlayerState): void {
+    if (playerState.deck.length > 0) {
+      const card = playerState.deck.shift()!;
+      playerState.hand.push(card);
     }
   }
 
-  private static handleDrawCard(gameState: GameState): GameState {
-    const currentPlayer = gameState.players[gameState.currentPlayerId];
+  private playCard(gameState: GameState, cardInstanceId: string, targetZone: string): void {
+    const currentPlayerState = gameState.playerStates[gameState.currentPlayer];
+    const cardIndex = currentPlayerState.hand.findIndex(c => c.instanceId === cardInstanceId);
+    
+    if (cardIndex === -1) return;
 
-    if (gameState.currentPhase !== 'Command Phase' || currentPlayer.hasDrawnCard || currentPlayer.deck.length === 0) {
-      return gameState;
+    const card = currentPlayerState.hand[cardIndex];
+    
+    // Check if card can be played in current phase and zone
+    if (!this.canPlayCardInZone(card, targetZone, gameState.currentPhase)) {
+      return;
     }
 
-    const drawnCard = currentPlayer.deck.shift();
-    if (drawnCard) {
-      currentPlayer.hand.push(drawnCard);
-      currentPlayer.hasDrawnCard = true;
+    // Check cost requirements
+    if (gameState.currentPhase === Phases.DEPLOYMENT && card.commandCost > currentPlayerState.commandPoints) {
+      return;
     }
-
-    return gameState;
-  }
-
-  private static handlePlayCard(gameState: GameState, actionData: { cardId: number, zone: string }): GameState {
-    const currentPlayer = gameState.players[gameState.currentPlayerId];
-    const { cardId, zone } = actionData;
 
     // Remove card from hand
-    const cardIndex = currentPlayer.hand.indexOf(cardId);
-    if (cardIndex === -1) {
-      return gameState;
-    }
-
-    currentPlayer.hand.splice(cardIndex, 1);
+    currentPlayerState.hand.splice(cardIndex, 1);
 
     // Add to appropriate zone
-    if (zone === 'command') {
-      if (gameState.currentPhase === 'Command Phase' && !currentPlayer.hasPlayedCommandCard) {
-        currentPlayer.commandZone.push(cardId);
-        currentPlayer.hasPlayedCommandCard = true;
-        // Add command points based on card type
-        currentPlayer.commandPoints += this.getCommandPointsForCard(cardId);
+    if (targetZone === 'command') {
+      currentPlayerState.commandZone.push(card);
+      if (gameState.currentPhase === Phases.COMMAND) {
+        const pointsToAdd = card.type.includes("Shipyard") ? 2 : 1;
+        currentPlayerState.commandPoints += pointsToAdd;
+        currentPlayerState.hasPlayedCommandCard = true;
       }
-    } else if (zone === 'unit') {
-      if (gameState.currentPhase === 'Deployment Phase') {
-        const cardCost = this.getCardCost(cardId);
-        if (currentPlayer.commandPoints >= cardCost) {
-          currentPlayer.unitZone.push(cardId);
-          currentPlayer.commandPoints -= cardCost;
-        } else {
-          // Return card to hand if not enough command points
-          currentPlayer.hand.push(cardId);
-        }
+    } else if (targetZone === 'unit') {
+      currentPlayerState.unitZone.push(card);
+      if (gameState.currentPhase === Phases.DEPLOYMENT) {
+        currentPlayerState.commandPoints -= card.commandCost;
       }
     }
-
-    return gameState;
   }
 
-  private static handleEndPhase(gameState: GameState): GameState {
-    switch (gameState.currentPhase) {
-      case 'Command Phase':
-        gameState.currentPhase = 'Deployment Phase';
-        break;
-      case 'Deployment Phase':
-        gameState.currentPhase = 'Battle Phase';
-        break;
-      case 'Battle Phase':
-        gameState.currentPhase = 'End Turn';
-        break;
-      case 'End Turn':
-        // Switch to next player and reset to Command Phase
-        const playerIds = Object.keys(gameState.players);
-        const currentIndex = playerIds.indexOf(gameState.currentPlayerId);
-        const nextIndex = (currentIndex + 1) % playerIds.length;
-        gameState.currentPlayerId = playerIds[nextIndex];
-        gameState.currentPhase = 'Command Phase';
-        
-        if (nextIndex === 0) {
-          gameState.turnNumber++;
-        }
-
-        // Reset phase-specific flags
-        Object.values(gameState.players).forEach(player => {
-          player.hasDrawnCard = false;
-          player.hasPlayedCommandCard = false;
-        });
-        break;
-    }
-
-    return gameState;
-  }
-
-  private static handleDeployUnit(gameState: GameState, actionData: { cardId: number, position: number }): GameState {
-    // Unit deployment logic would go here
-    return gameState;
-  }
-
-  private static handleAttack(gameState: GameState, actionData: { attackerId: number, targetId: number }): GameState {
-    // Combat logic would go here
-    const { attackerId, targetId } = actionData;
-    
-    // This would implement the actual combat rules
-    // For now, just a placeholder
-    
-    return gameState;
-  }
-
-  private static handleUseAbility(gameState: GameState, actionData: { cardId: number, targetId?: number, additionalData?: any }): GameState {
-    // Ability usage logic would go here
-    return gameState;
-  }
-
-  private static getCommandPointsForCard(cardId: number): number {
-    // This would look up card data to determine command points
-    // For now, return default values
-    return 1; // Most cards give 1 point, Shipyards give 2
-  }
-
-  private static getCardCost(cardId: number): number {
-    // This would look up card data to determine cost
-    // For now, return default cost
-    return 1;
-  }
-
-  static checkWinCondition(gameState: GameState): string | null {
-    for (const [playerId, player] of Object.entries(gameState.players)) {
-      if (player.health <= 0) {
-        // Find the winner (not the player with 0 health)
-        const playerIds = Object.keys(gameState.players);
-        const winnerId = playerIds.find(id => id !== playerId);
-        return winnerId || null;
+  private canPlayCardInZone(card: GameCard, zone: string, phase: string): boolean {
+    if (phase === Phases.COMMAND) {
+      return zone === 'command';
+    } else if (phase === Phases.DEPLOYMENT) {
+      if (zone === 'unit') {
+        return !card.type.includes("Shipyard");
       }
     }
-    return null;
-  }
-
-  static canPlayCard(gameState: GameState, playerId: string, cardId: number, zone: string): boolean {
-    const player = gameState.players[playerId];
-    
-    if (!player.hand.includes(cardId)) {
-      return false;
-    }
-
-    if (zone === 'command' && gameState.currentPhase === 'Command Phase' && !player.hasPlayedCommandCard) {
-      return true;
-    }
-
-    if (zone === 'unit' && gameState.currentPhase === 'Deployment Phase') {
-      const cardCost = this.getCardCost(cardId);
-      return player.commandPoints >= cardCost;
-    }
-
     return false;
   }
+
+  private endPhase(gameState: GameState): void {
+    const currentPlayerState = gameState.playerStates[gameState.currentPlayer];
+
+    switch (gameState.currentPhase) {
+      case Phases.COMMAND:
+        gameState.currentPhase = Phases.DEPLOYMENT;
+        break;
+      case Phases.DEPLOYMENT:
+        gameState.currentPhase = Phases.BATTLE;
+        this.initializeBattlePhase(gameState);
+        break;
+      case Phases.BATTLE:
+        gameState.currentPhase = Phases.END_TURN;
+        this.processBattlePhase(gameState);
+        break;
+      case Phases.END_TURN:
+        this.startNewTurn(gameState);
+        break;
+    }
+  }
+
+  private initializeBattlePhase(gameState: GameState): void {
+    // Prepare battle queue with all possible attacks
+    gameState.battleQueue = [];
+    
+    const currentPlayerState = gameState.playerStates[gameState.currentPlayer];
+    const otherPlayer = gameState.currentPlayer === 'player1' ? 'ai' : 'player1';
+    const otherPlayerState = gameState.playerStates[otherPlayer];
+
+    // Add attacks from current player's units
+    currentPlayerState.unitZone.forEach(unit => {
+      if (unit.attack > 0) {
+        // Check for valid targets
+        if (otherPlayerState.unitZone.length > 0) {
+          // Attack enemy units
+          otherPlayerState.unitZone.forEach(target => {
+            gameState.battleQueue.push({
+              attackerId: unit.instanceId,
+              targetId: target.instanceId,
+              damage: unit.attack,
+              type: 'unit'
+            });
+          });
+        } else {
+          // Direct attack on player
+          gameState.battleQueue.push({
+            attackerId: unit.instanceId,
+            damage: unit.attack,
+            type: 'direct'
+          });
+        }
+      }
+    });
+  }
+
+  private processBattlePhase(gameState: GameState): void {
+    const currentPlayerState = gameState.playerStates[gameState.currentPlayer];
+    const otherPlayer = gameState.currentPlayer === 'player1' ? 'ai' : 'player1';
+    const otherPlayerState = gameState.playerStates[otherPlayer];
+
+    // Process all battles in queue
+    gameState.battleQueue.forEach(battle => {
+      if (battle.type === 'unit' && battle.targetId) {
+        // Unit vs unit combat
+        const target = otherPlayerState.unitZone.find(u => u.instanceId === battle.targetId);
+        if (target) {
+          target.defense -= battle.damage;
+          
+          // Remove destroyed units
+          if (target.defense <= 0) {
+            const targetIndex = otherPlayerState.unitZone.findIndex(u => u.instanceId === battle.targetId);
+            if (targetIndex >= 0) {
+              const destroyedUnit = otherPlayerState.unitZone.splice(targetIndex, 1)[0];
+              otherPlayerState.graveyard.push(destroyedUnit);
+            }
+          }
+        }
+      } else if (battle.type === 'direct') {
+        // Direct damage to player
+        otherPlayerState.health -= battle.damage;
+      }
+    });
+
+    gameState.battleQueue = [];
+  }
+
+  private processAttack(gameState: GameState, attackerInstanceId: string, targetInstanceId?: string): void {
+    const currentPlayerState = gameState.playerStates[gameState.currentPlayer];
+    const otherPlayer = gameState.currentPlayer === 'player1' ? 'ai' : 'player1';
+    const otherPlayerState = gameState.playerStates[otherPlayer];
+
+    const attacker = currentPlayerState.unitZone.find(u => u.instanceId === attackerInstanceId);
+    if (!attacker) return;
+
+    if (targetInstanceId) {
+      // Attack specific target
+      const target = otherPlayerState.unitZone.find(u => u.instanceId === targetInstanceId);
+      if (target) {
+        target.defense -= attacker.attack;
+        attacker.defense -= target.attack; // Counter-attack
+
+        // Remove destroyed units
+        if (target.defense <= 0) {
+          const targetIndex = otherPlayerState.unitZone.findIndex(u => u.instanceId === targetInstanceId);
+          if (targetIndex >= 0) {
+            const destroyedUnit = otherPlayerState.unitZone.splice(targetIndex, 1)[0];
+            otherPlayerState.graveyard.push(destroyedUnit);
+          }
+        }
+
+        if (attacker.defense <= 0) {
+          const attackerIndex = currentPlayerState.unitZone.findIndex(u => u.instanceId === attackerInstanceId);
+          if (attackerIndex >= 0) {
+            const destroyedUnit = currentPlayerState.unitZone.splice(attackerIndex, 1)[0];
+            currentPlayerState.graveyard.push(destroyedUnit);
+          }
+        }
+      }
+    } else {
+      // Direct attack on player
+      otherPlayerState.health -= attacker.attack;
+    }
+  }
+
+  private startNewTurn(gameState: GameState): void {
+    // Switch to other player
+    gameState.currentPlayer = gameState.currentPlayer === 'player1' ? 'ai' : 'player1';
+    gameState.currentPhase = Phases.COMMAND;
+    gameState.turnNumber++;
+
+    // Reset player state for new turn
+    const currentPlayerState = gameState.playerStates[gameState.currentPlayer];
+    currentPlayerState.hasDrawnCard = false;
+    currentPlayerState.hasPlayedCommandCard = false;
+  }
+
+  private checkGameOver(gameState: GameState): void {
+    Object.keys(gameState.playerStates).forEach(playerId => {
+      if (gameState.playerStates[playerId].health <= 0) {
+        gameState.isGameOver = true;
+        gameState.winner = playerId === 'player1' ? 'ai' : 'player1';
+      }
+    });
+  }
 }
+
+export const gameEngine = new GameEngine();

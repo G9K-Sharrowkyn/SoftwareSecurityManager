@@ -1,213 +1,352 @@
-import type { GameState } from './gameEngine';
+import { GameState, PlayerState, GameCard } from "./gameEngine";
 
 export interface AIAction {
-  type: string;
+  action: string;
   data: any;
+  priority: number;
 }
 
-export class AIEngine {
-  static getNextAction(gameState: GameState, difficulty: string = 'Medium'): AIAction | null {
-    const aiPlayerId = this.findAIPlayerId(gameState);
-    if (!aiPlayerId || gameState.currentPlayerId !== aiPlayerId) {
-      return null;
-    }
+class AIEngine {
+  async getAIAction(gameState: GameState, difficulty = 'medium'): Promise<AIAction> {
+    const aiPlayerState = gameState.playerStates.ai;
+    const humanPlayerState = gameState.playerStates.player1;
 
-    const aiPlayer = gameState.players[aiPlayerId];
+    // Determine AI strategy based on difficulty
+    const strategy = this.getAIStrategy(difficulty);
     
+    // Get possible actions for current phase
+    const possibleActions = this.getPossibleActions(gameState, aiPlayerState);
+    
+    // Evaluate and prioritize actions
+    const evaluatedActions = possibleActions.map(action => ({
+      ...action,
+      priority: this.evaluateAction(action, gameState, strategy)
+    }));
+
+    // Sort by priority and pick the best action
+    evaluatedActions.sort((a, b) => b.priority - a.priority);
+    
+    return evaluatedActions[0] || { action: 'endPhase', data: {}, priority: 0 };
+  }
+
+  private getAIStrategy(difficulty: string) {
+    const strategies = {
+      easy: {
+        aggression: 0.3,
+        planning: 0.2,
+        cardEfficiency: 0.3,
+        riskTolerance: 0.8
+      },
+      medium: {
+        aggression: 0.6,
+        planning: 0.5,
+        cardEfficiency: 0.6,
+        riskTolerance: 0.5
+      },
+      hard: {
+        aggression: 0.8,
+        planning: 0.9,
+        cardEfficiency: 0.9,
+        riskTolerance: 0.2
+      }
+    };
+
+    return strategies[difficulty as keyof typeof strategies] || strategies.medium;
+  }
+
+  private getPossibleActions(gameState: GameState, aiPlayerState: PlayerState): AIAction[] {
+    const actions: AIAction[] = [];
+
     switch (gameState.currentPhase) {
       case 'Command Phase':
-        return this.getCommandPhaseAction(gameState, aiPlayerId, difficulty);
-      
+        // Draw card if not done
+        if (!aiPlayerState.hasDrawnCard && aiPlayerState.deck.length > 0) {
+          actions.push({
+            action: 'drawCard',
+            data: {},
+            priority: 0
+          });
+        }
+
+        // Play command cards
+        if (!aiPlayerState.hasPlayedCommandCard) {
+          const commandCards = aiPlayerState.hand.filter(card => 
+            card.type.includes("Shipyard") || this.canPlayInCommandPhase(card)
+          );
+          
+          commandCards.forEach(card => {
+            actions.push({
+              action: 'playCard',
+              data: { cardInstanceId: card.instanceId, targetZone: 'command' },
+              priority: 0
+            });
+          });
+        }
+
+        // End phase
+        actions.push({
+          action: 'endPhase',
+          data: {},
+          priority: 0
+        });
+        break;
+
       case 'Deployment Phase':
-        return this.getDeploymentPhaseAction(gameState, aiPlayerId, difficulty);
-      
+        // Play unit cards
+        const playableUnits = aiPlayerState.hand.filter(card => 
+          !card.type.includes("Shipyard") && card.commandCost <= aiPlayerState.commandPoints
+        );
+        
+        playableUnits.forEach(card => {
+          actions.push({
+            action: 'playCard',
+            data: { cardInstanceId: card.instanceId, targetZone: 'unit' },
+            priority: 0
+          });
+        });
+
+        // End phase
+        actions.push({
+          action: 'endPhase',
+          data: {},
+          priority: 0
+        });
+        break;
+
       case 'Battle Phase':
-        return this.getBattlePhaseAction(gameState, aiPlayerId, difficulty);
-      
+        // Attack with units
+        aiPlayerState.unitZone.forEach(unit => {
+          if (unit.attack > 0) {
+            const humanUnits = gameState.playerStates.player1.unitZone;
+            
+            if (humanUnits.length > 0) {
+              // Attack enemy units
+              humanUnits.forEach(target => {
+                actions.push({
+                  action: 'attack',
+                  data: { 
+                    attackerInstanceId: unit.instanceId, 
+                    targetInstanceId: target.instanceId 
+                  },
+                  priority: 0
+                });
+              });
+            } else {
+              // Direct attack
+              actions.push({
+                action: 'attack',
+                data: { attackerInstanceId: unit.instanceId },
+                priority: 0
+              });
+            }
+          }
+        });
+
+        // End phase
+        actions.push({
+          action: 'endPhase',
+          data: {},
+          priority: 0
+        });
+        break;
+
       case 'End Turn':
-        return { type: 'END_PHASE', data: {} };
+        actions.push({
+          action: 'endPhase',
+          data: {},
+          priority: 0
+        });
+        break;
+    }
+
+    return actions;
+  }
+
+  private canPlayInCommandPhase(card: GameCard): boolean {
+    // Define which non-shipyard cards can be played in command phase
+    return card.type.includes("Command") || card.type.includes("Infrastructure");
+  }
+
+  private evaluateAction(action: AIAction, gameState: GameState, strategy: any): number {
+    const aiPlayerState = gameState.playerStates.ai;
+    const humanPlayerState = gameState.playerStates.player1;
+    let priority = 0;
+
+    switch (action.action) {
+      case 'drawCard':
+        // Always good to draw cards
+        priority = 70;
+        break;
+
+      case 'playCard':
+        const card = this.findCardByInstanceId(aiPlayerState.hand, action.data.cardInstanceId);
+        if (card) {
+          priority = this.evaluateCardPlay(card, gameState, strategy);
+        }
+        break;
+
+      case 'attack':
+        priority = this.evaluateAttack(action, gameState, strategy);
+        break;
+
+      case 'endPhase':
+        // Default action, usually lower priority unless nothing else to do
+        priority = 10;
+        break;
+    }
+
+    return priority;
+  }
+
+  private evaluateCardPlay(card: GameCard, gameState: GameState, strategy: any): number {
+    let priority = 30;
+
+    // Shipyard cards are valuable for command points
+    if (card.type.includes("Shipyard")) {
+      priority += 50 * strategy.planning;
+    }
+
+    // Unit cards for combat
+    if (!card.type.includes("Shipyard")) {
+      priority += (card.attack + card.defense) * 5 * strategy.aggression;
       
-      default:
-        return null;
-    }
-  }
-
-  private static findAIPlayerId(gameState: GameState): string | null {
-    // In AI games, we assume one player is 'AI'
-    // This could be improved to track AI players better
-    const playerIds = Object.keys(gameState.players);
-    return playerIds.find(id => id === 'AI') || playerIds[1] || null;
-  }
-
-  private static getCommandPhaseAction(gameState: GameState, aiPlayerId: string, difficulty: string): AIAction | null {
-    const aiPlayer = gameState.players[aiPlayerId];
-
-    // First, try to draw a card if we haven't already
-    if (!aiPlayer.hasDrawnCard && aiPlayer.deck.length > 0) {
-      return { type: 'DRAW_CARD', data: {} };
-    }
-
-    // Then, try to play a command card if we haven't already
-    if (!aiPlayer.hasPlayedCommandCard && aiPlayer.hand.length > 0) {
-      const commandCards = this.getCommandCardsInHand(aiPlayer.hand);
-      if (commandCards.length > 0) {
-        const selectedCard = this.selectBestCommandCard(commandCards, difficulty);
-        return {
-          type: 'PLAY_CARD',
-          data: { cardId: selectedCard, zone: 'command' }
-        };
+      // Higher priority if we need units for defense
+      const humanUnitCount = gameState.playerStates.player1.unitZone.length;
+      const aiUnitCount = gameState.playerStates.ai.unitZone.length;
+      
+      if (humanUnitCount > aiUnitCount) {
+        priority += 20;
       }
     }
 
-    // End phase if nothing else to do
-    return { type: 'END_PHASE', data: {} };
-  }
-
-  private static getDeploymentPhaseAction(gameState: GameState, aiPlayerId: string, difficulty: string): AIAction | null {
-    const aiPlayer = gameState.players[aiPlayerId];
-
-    // Try to deploy units based on available command points
-    const deployableUnits = this.getDeployableUnits(aiPlayer.hand, aiPlayer.commandPoints);
-    
-    if (deployableUnits.length > 0) {
-      const selectedUnit = this.selectBestUnit(deployableUnits, difficulty, gameState, aiPlayerId);
-      return {
-        type: 'PLAY_CARD',
-        data: { cardId: selectedUnit, zone: 'unit' }
-      };
+    // Cost efficiency
+    if (card.commandCost > 0) {
+      const efficiency = (card.attack + card.defense) / card.commandCost;
+      priority += efficiency * 10 * strategy.cardEfficiency;
     }
 
-    // End phase if no deployable units
-    return { type: 'END_PHASE', data: {} };
+    return priority;
   }
 
-  private static getBattlePhaseAction(gameState: GameState, aiPlayerId: string, difficulty: string): AIAction | null {
-    const aiPlayer = gameState.players[aiPlayerId];
-    const enemyPlayerId = this.getEnemyPlayerId(gameState, aiPlayerId);
+  private evaluateAttack(action: AIAction, gameState: GameState, strategy: any): number {
+    const attacker = this.findCardByInstanceId(
+      gameState.playerStates.ai.unitZone, 
+      action.data.attackerInstanceId
+    );
     
-    if (!enemyPlayerId) {
-      return { type: 'END_PHASE', data: {} };
-    }
+    if (!attacker) return 0;
 
-    const enemyPlayer = gameState.players[enemyPlayerId];
+    let priority = 40;
 
-    // Simple AI strategy: attack with all units
-    if (aiPlayer.unitZone.length > 0) {
-      const attackingUnit = aiPlayer.unitZone[0];
+    if (action.data.targetInstanceId) {
+      // Unit vs unit combat
+      const target = this.findCardByInstanceId(
+        gameState.playerStates.player1.unitZone,
+        action.data.targetInstanceId
+      );
       
-      // Choose target based on difficulty
-      let targetId: number | string;
+      if (target) {
+        // Prioritize attacks where we can destroy the target without dying
+        if (attacker.attack >= target.defense && target.attack < attacker.defense) {
+          priority += 60;
+        }
+        
+        // Prioritize removing threats
+        if (target.attack > attacker.defense) {
+          priority += 30;
+        }
+        
+        // Consider value trade
+        const valueGained = target.attack + target.defense;
+        const valueLost = Math.max(0, target.attack - attacker.defense);
+        priority += (valueGained - valueLost) * 2;
+      }
+    } else {
+      // Direct attack
+      const humanHealth = gameState.playerStates.player1.health;
       
-      if (enemyPlayer.unitZone.length > 0 && difficulty !== 'Easy') {
-        // Attack enemy units if they exist (except on Easy)
-        targetId = enemyPlayer.unitZone[0];
+      // Prioritize direct attacks when human is low on health
+      if (humanHealth <= attacker.attack) {
+        priority += 100; // Game winning move
+      } else if (humanHealth < 30) {
+        priority += 50 * strategy.aggression;
       } else {
-        // Attack player directly
-        targetId = enemyPlayerId;
+        priority += 20 * strategy.aggression;
       }
-
-      return {
-        type: 'ATTACK',
-        data: { attackerId: attackingUnit, targetId }
-      };
+      
+      // Less priority if human has strong units that can counter-attack
+      const humanThreatLevel = gameState.playerStates.player1.unitZone
+        .reduce((total, unit) => total + unit.attack, 0);
+      
+      if (humanThreatLevel > attacker.defense) {
+        priority -= 20 * (1 - strategy.riskTolerance);
+      }
     }
 
-    // End phase if no units to attack with
-    return { type: 'END_PHASE', data: {} };
+    return priority;
   }
 
-  private static getCommandCardsInHand(hand: number[]): number[] {
-    // This would check card types to find command cards
-    // For now, assume any card can be played as command
-    return hand.slice(0, 1); // Just take first card for simplicity
+  private findCardByInstanceId(cards: GameCard[], instanceId: string): GameCard | undefined {
+    return cards.find(card => card.instanceId === instanceId);
   }
 
-  private static selectBestCommandCard(commandCards: number[], difficulty: string): number {
-    // AI decision making based on difficulty
-    switch (difficulty) {
-      case 'Easy':
-        // Random selection
-        return commandCards[Math.floor(Math.random() * commandCards.length)];
-      
-      case 'Medium':
-        // Slightly better selection (prefer higher value cards)
-        return commandCards[0]; // Simplified
-      
-      case 'Hard':
-        // Optimal selection based on game state
-        return this.getOptimalCommandCard(commandCards);
-      
-      default:
-        return commandCards[0];
-    }
-  }
+  // AI deck building for different difficulties
+  generateAIDeck(difficulty: string): {cardId: number, quantity: number}[] {
+    const deck: {cardId: number, quantity: number}[] = [];
+    
+    // Base deck structure
+    const deckTemplates = {
+      easy: {
+        shipyards: [
+          { cardId: 1, quantity: 2 },
+          { cardId: 2, quantity: 2 }
+        ],
+        units: [
+          { cardId: 10, quantity: 6 },
+          { cardId: 11, quantity: 4 },
+          { cardId: 12, quantity: 3 }
+        ]
+      },
+      medium: {
+        shipyards: [
+          { cardId: 1, quantity: 3 },
+          { cardId: 2, quantity: 2 },
+          { cardId: 3, quantity: 2 }
+        ],
+        units: [
+          { cardId: 15, quantity: 4 },
+          { cardId: 16, quantity: 4 },
+          { cardId: 17, quantity: 3 },
+          { cardId: 18, quantity: 3 }
+        ]
+      },
+      hard: {
+        shipyards: [
+          { cardId: 1, quantity: 3 },
+          { cardId: 2, quantity: 3 },
+          { cardId: 3, quantity: 2 },
+          { cardId: 4, quantity: 2 }
+        ],
+        units: [
+          { cardId: 20, quantity: 3 },
+          { cardId: 21, quantity: 3 },
+          { cardId: 22, quantity: 2 },
+          { cardId: 23, quantity: 2 },
+          { cardId: 24, quantity: 2 }
+        ]
+      }
+    };
 
-  private static getDeployableUnits(hand: number[], commandPoints: number): number[] {
-    // This would filter units by cost vs available command points
-    // For now, assume all cards in hand are deployable if we have any points
-    return commandPoints > 0 ? hand.slice(0, Math.min(hand.length, commandPoints)) : [];
-  }
-
-  private static selectBestUnit(deployableUnits: number[], difficulty: string, gameState: GameState, aiPlayerId: string): number {
-    // AI unit selection based on difficulty
-    switch (difficulty) {
-      case 'Easy':
-        return deployableUnits[Math.floor(Math.random() * deployableUnits.length)];
-      
-      case 'Medium':
-        // Prefer units that cost more (generally stronger)
-        return deployableUnits[0];
-      
-      case 'Hard':
-        // Consider game state and opponent's units
-        return this.getOptimalUnit(deployableUnits, gameState, aiPlayerId);
-      
-      default:
-        return deployableUnits[0];
-    }
-  }
-
-  private static getOptimalCommandCard(commandCards: number[]): number {
-    // Advanced AI logic for selecting best command card
-    // This would consider card abilities, current game state, etc.
-    return commandCards[0]; // Simplified for now
-  }
-
-  private static getOptimalUnit(deployableUnits: number[], gameState: GameState, aiPlayerId: string): number {
-    // Advanced AI logic for selecting best unit
-    // This would consider unit stats, abilities, current board state, etc.
-    return deployableUnits[0]; // Simplified for now
-  }
-
-  private static getEnemyPlayerId(gameState: GameState, aiPlayerId: string): string | null {
-    const playerIds = Object.keys(gameState.players);
-    return playerIds.find(id => id !== aiPlayerId) || null;
-  }
-
-  static evaluateGameState(gameState: GameState, playerId: string): number {
-    // Evaluate how good the current game state is for the AI
-    // Returns a score (higher = better for AI)
-    const player = gameState.players[playerId];
-    const enemyId = this.getEnemyPlayerId(gameState, playerId);
+    const template = deckTemplates[difficulty as keyof typeof deckTemplates] || deckTemplates.medium;
     
-    if (!enemyId) return 0;
+    // Add shipyards
+    template.shipyards.forEach(card => deck.push(card));
     
-    const enemy = gameState.players[enemyId];
+    // Add units
+    template.units.forEach(card => deck.push(card));
     
-    let score = 0;
-    
-    // Health difference
-    score += (player.health - enemy.health) * 2;
-    
-    // Unit advantage
-    score += (player.unitZone.length - enemy.unitZone.length) * 10;
-    
-    // Command point advantage
-    score += (player.commandPoints - enemy.commandPoints) * 5;
-    
-    // Hand size advantage
-    score += (player.hand.length - enemy.hand.length) * 3;
-    
-    return score;
+    return deck;
   }
 }
+
+export const aiEngine = new AIEngine();
